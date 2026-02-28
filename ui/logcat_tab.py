@@ -3,6 +3,7 @@
 import logging
 import re
 import subprocess
+import time
 from collections import deque
 from pathlib import Path
 
@@ -127,6 +128,50 @@ class LogcatHighlighter(QSyntaxHighlighter):
             self.setFormat(msg_start, len(text) - msg_start, self._fmt_cache[line_fmt_key])
 
 
+class LogcatView(QPlainTextEdit):
+    """QPlainTextEdit subclass with controllable auto-scroll.
+
+    When follow is off, preserves the user's viewport position even as
+    new lines are appended and old lines are trimmed by maxBlockCount.
+    """
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._follow = True
+
+    def set_follow(self, on: bool) -> None:
+        self._follow = on
+
+    def append_lines(self, text: str) -> None:
+        """Append text. Scroll behavior controlled by _follow flag."""
+        bar = self.verticalScrollBar()
+
+        if self._follow:
+            cursor = QTextCursor(self.document())
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            cursor.insertText(text)
+            bar.setValue(bar.maximum())
+        else:
+            # Track which block is at the top of the viewport
+            target_block = self.firstVisibleBlock().blockNumber()
+
+            cursor = QTextCursor(self.document())
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            cursor.insertText(text)
+
+            # After insert (and possible trimming), scroll back to
+            # show the same block. The block number stays valid because
+            # trimming removes from the top, shifting all numbers down,
+            # but firstVisibleBlock already accounts for that.
+            block = self.document().findBlockByNumber(target_block)
+            if block.isValid():
+                cursor = QTextCursor(block)
+                # Use setTextCursor + centerOnScroll to position viewport
+                self.setTextCursor(cursor)
+                # Now ensure it's at the TOP of viewport, not centered
+                bar.setValue(target_block)
+
+
 class LogcatReader(QThread):
     """Read logcat in background, filter there, emit pre-filtered batches."""
 
@@ -148,6 +193,7 @@ class LogcatReader(QThread):
     def run(self) -> None:
         self._running = True
         batch: list[str] = []
+        last_emit = time.monotonic()
         try:
             self._process = self._adb.stream_logcat()
             if not self._process.stdout:
@@ -158,10 +204,12 @@ class LogcatReader(QThread):
                 line = raw_line.rstrip("\n")
                 if self._passes_filter(line):
                     batch.append(line)
-                # Emit batch every 200 lines or when buffer has content
-                if len(batch) >= 200:
+                # Emit when batch is large enough OR enough time has passed
+                now = time.monotonic()
+                if len(batch) >= 200 or (batch and now - last_emit >= 0.1):
                     self.batch_ready.emit(batch)
                     batch = []
+                    last_emit = now
             # Emit remaining
             if batch and self._running:
                 self.batch_ready.emit(batch)
@@ -274,7 +322,7 @@ class LogcatTab(QWidget):
 
         self._auto_scroll_check = QCheckBox("Auto-scroll")
         self._auto_scroll_check.setChecked(True)
-        self._auto_scroll_check.toggled.connect(lambda on: setattr(self, "_auto_scroll", on))
+        self._auto_scroll_check.toggled.connect(self._on_auto_scroll_toggled)
         filter_row.addWidget(self._auto_scroll_check)
 
         layout.addLayout(filter_row)
@@ -308,8 +356,8 @@ class LogcatTab(QWidget):
         display_row.addStretch()
         layout.addLayout(display_row)
 
-        # --- Log output (QPlainTextEdit + highlighter) ---
-        self._output = QPlainTextEdit()
+        # --- Log output (LogcatView + highlighter) ---
+        self._output = LogcatView()
         self._output.setReadOnly(True)
         self._output.setFont(QFont("JetBrains Mono", self._font_size))
         # Fallback chain if JetBrains Mono not installed
@@ -360,6 +408,12 @@ class LogcatTab(QWidget):
         ctrl_row.addWidget(self._count_label)
 
         layout.addLayout(ctrl_row)
+
+    def _on_auto_scroll_toggled(self, on: bool) -> None:
+        self._auto_scroll = on
+        self._output.set_follow(on)
+        if on:
+            self._output.moveCursor(QTextCursor.MoveOperation.End)
 
     # --- Filter sync (push filters to worker thread) ---
 
@@ -432,33 +486,23 @@ class LogcatTab(QWidget):
     def _on_batch(self, lines: list[str]) -> None:
         """Receive a pre-filtered batch from the worker thread."""
         self._line_count += len(lines)
-        if self._paused:
-            return
+        # Always buffer — pause only prevents flushing to display
         self._pending.extend(lines)
 
     def _flush_pending(self) -> None:
         """Flush buffered lines to the display — capped per tick for responsiveness."""
-        if not self._pending:
+        if not self._pending or self._paused:
+            self._count_label.setText(f"{self._line_count} lines")
             return
 
         # Take at most _FLUSH_BATCH_LIMIT lines per tick
         count = min(len(self._pending), self._FLUSH_BATCH_LIMIT)
         batch = [self._pending.popleft() for _ in range(count)]
 
-        # Disable viewport updates during bulk insert (highlighter still runs per-block)
-        self._output.setUpdatesEnabled(False)
-
-        cursor = self._output.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertText("\n".join(batch) + "\n")
-
-        self._output.setUpdatesEnabled(True)
+        self._output.append_lines("\n".join(batch) + "\n")
 
         self._count_label.setText(f"{self._line_count} lines")
         self._rate_label.setText(f"+{count}")
-
-        if self._auto_scroll:
-            self._output.moveCursor(QTextCursor.MoveOperation.End)
 
     # --- Actions ---
 
