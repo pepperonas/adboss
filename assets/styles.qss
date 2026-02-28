@@ -234,6 +234,44 @@ QTextEdit#logcatOutput {
     font-size: 11px;
 }
 
+/* --- Plain Text Edit (Logcat) --- */
+QPlainTextEdit {
+    background-color: #1a1a1a;
+    color: #d4d4d4;
+    border: 1px solid #333333;
+    border-radius: 4px;
+    selection-background-color: #00838F;
+}
+
+QPlainTextEdit#logcatOutput {
+    background-color: #0a0a0a;
+    color: #cccccc;
+}
+
+/* --- Spin Box --- */
+QSpinBox {
+    background-color: #2d2d2d;
+    color: #d4d4d4;
+    border: 1px solid #444444;
+    border-radius: 4px;
+    padding: 2px 6px;
+    min-height: 22px;
+}
+
+QSpinBox:focus {
+    border-color: #00BCD4;
+}
+
+QSpinBox::up-button, QSpinBox::down-button {
+    background-color: #333333;
+    border: none;
+    width: 16px;
+}
+
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+    background-color: #00838F;
+}
+
 /* --- Tables --- */
 QTableWidget {
     background-color: #1e1e1e;
