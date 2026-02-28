@@ -19,12 +19,14 @@ ADBOSS provides a unified control panel for device monitoring, system settings, 
 ![GUI](https://img.shields.io/badge/GUI-Desktop%20App-00BCD4?style=flat-square)
 ![Theme](https://img.shields.io/badge/Theme-Dark%20Mode-1e1e1e?style=flat-square&labelColor=333333)
 ![Architecture](https://img.shields.io/badge/Architecture-Multi--Threaded-blueviolet?style=flat-square)
+![Lines of Code](https://img.shields.io/badge/Python-3000%2B%20Lines-blue?style=flat-square&logo=python&logoColor=white)
 ![ADB Commands](https://img.shields.io/badge/ADB%20Commands-48-informational?style=flat-square)
 ![Tabs](https://img.shields.io/badge/Tabs-6-00BCD4?style=flat-square)
-![QSS](https://img.shields.io/badge/Stylesheet-430%2B%20Lines-ff69b4?style=flat-square)
+![QSS](https://img.shields.io/badge/Stylesheet-470%2B%20Lines-ff69b4?style=flat-square)
 ![No External ADB Libs](https://img.shields.io/badge/ADB%20Libs-None%20(subprocess)-success?style=flat-square)
 ![Config](https://img.shields.io/badge/Config-JSON%20Persistent-orange?style=flat-square)
 ![Drag & Drop](https://img.shields.io/badge/Drag%20%26%20Drop-Supported-brightgreen?style=flat-square)
+![Font](https://img.shields.io/badge/Font-JetBrains%20Mono-000000?style=flat-square&logo=jetbrains&logoColor=white)
 ![GitHub repo size](https://img.shields.io/github/repo-size/pepperonas/adboss?style=flat-square)
 ![GitHub last commit](https://img.shields.io/github/last-commit/pepperonas/adboss?style=flat-square)
 ![GitHub stars](https://img.shields.io/github/stars/pepperonas/adboss?style=flat-square)
@@ -70,7 +72,7 @@ Real-time device overview with auto-refresh (configurable, default 5s):
 - **Path Memory** — Last used local and remote paths are persisted across sessions
 
 ### ADB Shell
-- **Terminal Emulator** — Dark background, monospace font, color-coded output
+- **Terminal Emulator** — Dark background, JetBrains Mono font, color-coded output
 - **Command History** — Up/Down arrow navigation, stores last 100 commands
 - **Timestamps** — Every command and output block is timestamped
 - **Quick Actions** — One-click buttons for Reboot, Bootloader, Recovery, getprop, ps, df
@@ -78,15 +80,20 @@ Real-time device overview with auto-refresh (configurable, default 5s):
 
 ### Logcat Viewer
 - **Live Streaming** — Real-time logcat output via background thread
+- **High Performance** — QPlainTextEdit with QSyntaxHighlighter, batch rendering (50ms flush), no HTML overhead
 - **Color Coding** — Verbose (gray), Debug (blue), Info (green), Warning (yellow), Error (red), Fatal (purple)
+- **Monospaced Font** — JetBrains Mono with fallback chain (Fira Code, Source Code Pro, Menlo, Consolas)
 - **Filters** — Log level dropdown, tag filter, PID filter, free-text search — all combinable
 - **Pause/Resume** — Pause display while buffering continues
 - **Auto-Scroll** — Toggleable, enabled by default
+- **Font Size** — Adjustable via spinner (7–24 px)
+- **Line Wrap** — Toggleable word wrap
+- **Buffer Limit** — Configurable max lines (1,000–100,000), oldest lines trimmed automatically
+- **Rate Indicator** — Shows lines-per-flush for throughput monitoring
 - **Export** — Save buffered logcat to `.txt` file
-- **Buffer Limit** — Configurable max 5000 lines (oldest lines trimmed)
 
 ### General
-- **Dark Theme** — Full QSS stylesheet with cyan (#00BCD4) accent color
+- **Dark Theme** — Full QSS stylesheet (470+ lines) with cyan (#00BCD4) accent color
 - **Multi-Device** — Device selector dropdown with auto-detection (polls every 3s)
 - **Status Bar** — Connection status, last action result, copyright
 - **Responsive** — Freely resizable, minimum 900×600, window size persisted
@@ -145,8 +152,9 @@ adboss/
 ├── main.py                         # Entry point
 ├── requirements.txt                # PySide6
 ├── assets/
+│   ├── banner.png                  # README banner image
 │   ├── icon.png                    # App icon (generated)
-│   └── styles.qss                  # Dark theme stylesheet (430+ lines)
+│   └── styles.qss                  # Dark theme stylesheet (470+ lines)
 ├── core/
 │   ├── adb_client.py               # ADB wrapper (48 methods, all subprocess calls)
 │   ├── device_monitor.py           # QThread for periodic device stats
@@ -158,7 +166,7 @@ adboss/
 │   ├── apps_tab.py                 # Package list, install, permissions
 │   ├── files_tab.py                # Dual-pane file browser, drag & drop
 │   ├── shell_tab.py                # ADB shell terminal
-│   ├── logcat_tab.py               # Live logcat with filters
+│   ├── logcat_tab.py               # Live logcat with highlighter & filters
 │   └── widgets/
 │       ├── battery_widget.py       # Circular gauge (custom QPainter)
 │       ├── storage_widget.py       # Labeled progress bar
@@ -194,6 +202,16 @@ The GUI thread never blocks. Five worker types handle ADB I/O:
 | `LogcatReader` | Long-running QThread | Streams logcat lines continuously |
 
 All thread→UI communication uses Qt signals/slots.
+
+### Logcat Rendering Pipeline
+
+The logcat viewer uses a high-performance rendering pipeline optimized for high-throughput log streams:
+
+1. **LogcatReader** (QThread) — Reads lines from `adb logcat` via `subprocess.Popen`
+2. **Line buffer** — Incoming lines are filtered (level, tag, PID, text) and queued in `_pending`
+3. **Flush timer** (50ms QTimer) — Joins queued lines into a single text block and inserts at cursor end
+4. **LogcatHighlighter** (QSyntaxHighlighter) — Colors each line using compiled regex and cached `QTextCharFormat` objects
+5. **QPlainTextEdit** — Renders with `setMaximumBlockCount` for automatic oldest-line trimming
 
 ### Configuration
 
@@ -235,21 +253,29 @@ ADBOSS wraps **48 ADB commands** across 10 categories:
 
 The dark theme is defined in `assets/styles.qss` with these design tokens:
 
-| Role | Color |
-|------|-------|
-| Background | `#1e1e1e` |
-| Surface | `#252526` |
-| Widget BG | `#2d2d2d` |
-| Text | `#d4d4d4` |
-| Muted | `#888888` |
-| Accent | `#00BCD4` (Cyan) |
-| Accent Dark | `#00838F` (Teal) |
-| Success | `#4CAF50` (Green) |
-| Warning | `#FFC107` (Amber) |
-| Error | `#F44336` (Red) |
-| Fatal | `#E040FB` (Purple) |
+| Role | Color | Preview |
+|------|-------|---------|
+| Background | `#1e1e1e` | ![#1e1e1e](https://via.placeholder.com/12/1e1e1e/1e1e1e.png) |
+| Surface | `#252526` | ![#252526](https://via.placeholder.com/12/252526/252526.png) |
+| Widget BG | `#2d2d2d` | ![#2d2d2d](https://via.placeholder.com/12/2d2d2d/2d2d2d.png) |
+| Text | `#d4d4d4` | ![#d4d4d4](https://via.placeholder.com/12/d4d4d4/d4d4d4.png) |
+| Muted | `#888888` | ![#888888](https://via.placeholder.com/12/888888/888888.png) |
+| Accent | `#00BCD4` (Cyan) | ![#00BCD4](https://via.placeholder.com/12/00BCD4/00BCD4.png) |
+| Accent Dark | `#00838F` (Teal) | ![#00838F](https://via.placeholder.com/12/00838F/00838F.png) |
+| Success | `#4CAF50` (Green) | ![#4CAF50](https://via.placeholder.com/12/4CAF50/4CAF50.png) |
+| Warning | `#FFC107` (Amber) | ![#FFC107](https://via.placeholder.com/12/FFC107/FFC107.png) |
+| Error | `#F44336` (Red) | ![#F44336](https://via.placeholder.com/12/F44336/F44336.png) |
+| Fatal | `#E040FB` (Purple) | ![#E040FB](https://via.placeholder.com/12/E040FB/E040FB.png) |
 
 The stylesheet covers all Qt widgets (buttons, sliders, tabs, tables, trees, scrollbars, dialogs, menus, tooltips) for a consistent appearance.
+
+### Monospaced Fonts
+
+Terminal and logcat views use **JetBrains Mono** as primary font with automatic fallback:
+
+```
+JetBrains Mono → Fira Code → Source Code Pro → Menlo → Consolas → monospace
+```
 
 ---
 
