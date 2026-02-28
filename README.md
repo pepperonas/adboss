@@ -2,12 +2,34 @@
 
 **Android Debug Bridge Desktop Manager** — A PySide6/Qt6 desktop application for controlling Android devices via ADB.
 
+<p align="center">
+  <img src="assets/banner.png" alt="ADBOSS — Android Debug Bridge Desktop Manager" width="800">
+</p>
+
 ADBOSS provides a unified control panel for device monitoring, system settings, app management, file transfer, shell access, and live logcat viewing — all from a single dark-themed GUI.
 
-![Python](https://img.shields.io/badge/Python-3.11+-blue)
-![Qt](https://img.shields.io/badge/GUI-PySide6%20(Qt6)-green)
-![License](https://img.shields.io/badge/License-MIT-yellow)
-![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
+<p align="center">
+
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Qt](https://img.shields.io/badge/Qt6-PySide6-41CD52?style=for-the-badge&logo=qt&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
+![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=for-the-badge)
+
+![ADB](https://img.shields.io/badge/ADB-Android%20Debug%20Bridge-3DDC84?style=flat-square&logo=android&logoColor=white)
+![GUI](https://img.shields.io/badge/GUI-Desktop%20App-00BCD4?style=flat-square)
+![Theme](https://img.shields.io/badge/Theme-Dark%20Mode-1e1e1e?style=flat-square&labelColor=333333)
+![Architecture](https://img.shields.io/badge/Architecture-Multi--Threaded-blueviolet?style=flat-square)
+![ADB Commands](https://img.shields.io/badge/ADB%20Commands-48-informational?style=flat-square)
+![Tabs](https://img.shields.io/badge/Tabs-6-00BCD4?style=flat-square)
+![QSS](https://img.shields.io/badge/Stylesheet-430%2B%20Lines-ff69b4?style=flat-square)
+![No External ADB Libs](https://img.shields.io/badge/ADB%20Libs-None%20(subprocess)-success?style=flat-square)
+![Config](https://img.shields.io/badge/Config-JSON%20Persistent-orange?style=flat-square)
+![Drag & Drop](https://img.shields.io/badge/Drag%20%26%20Drop-Supported-brightgreen?style=flat-square)
+![GitHub repo size](https://img.shields.io/github/repo-size/pepperonas/adboss?style=flat-square)
+![GitHub last commit](https://img.shields.io/github/last-commit/pepperonas/adboss?style=flat-square)
+![GitHub stars](https://img.shields.io/github/stars/pepperonas/adboss?style=flat-square)
+
+</p>
 
 ---
 

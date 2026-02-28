@@ -211,7 +211,7 @@ QLineEdit:focus {
 QLineEdit#shellInput {
     background-color: #1a1a1a;
     color: #4CAF50;
-    font-family: "Menlo", "Consolas", monospace;
+    font-family: "JetBrains Mono", "Fira Code", "Source Code Pro", "Menlo", "Consolas", monospace;
 }
 
 /* --- Text Edit --- */

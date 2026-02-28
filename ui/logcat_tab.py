@@ -267,7 +267,15 @@ class LogcatTab(QWidget):
         # --- Log output (QPlainTextEdit + highlighter) ---
         self._output = QPlainTextEdit()
         self._output.setReadOnly(True)
-        self._output.setFont(QFont("Menlo", self._font_size))
+        self._output.setFont(QFont("JetBrains Mono", self._font_size))
+        # Fallback chain if JetBrains Mono not installed
+        font = self._output.font()
+        if not font.exactMatch():
+            for fallback in ("Fira Code", "Source Code Pro", "Menlo", "Consolas", "monospace"):
+                font.setFamily(fallback)
+                self._output.setFont(font)
+                if self._output.font().exactMatch():
+                    break
         self._output.setObjectName("logcatOutput")
         self._output.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self._output.setMaximumBlockCount(self._max_lines)
