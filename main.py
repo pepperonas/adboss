@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
 from ui.main_window import MainWindow
+from version import __version__
 
 # Configure logging
 logging.basicConfig(
@@ -31,6 +32,7 @@ def main() -> None:
     """Application entry point."""
     app = QApplication(sys.argv)
     app.setApplicationName("ADBOSS")
+    app.setApplicationVersion(__version__)
     app.setOrganizationName("celox.io")
 
     # Icon

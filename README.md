@@ -10,6 +10,7 @@ ADBOSS provides a unified control panel for device monitoring, system settings, 
 
 <p align="center">
 
+![Version](https://img.shields.io/badge/Version-0.0.1-00BCD4?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Qt](https://img.shields.io/badge/Qt6-PySide6-41CD52?style=for-the-badge&logo=qt&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
@@ -150,6 +151,7 @@ Connect your Android device via USB (with USB Debugging enabled) or via `adb con
 ```
 adboss/
 ├── main.py                         # Entry point
+├── version.py                      # Semantic version (single source of truth)
 ├── requirements.txt                # PySide6
 ├── assets/
 │   ├── banner.png                  # README banner image

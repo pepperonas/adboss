@@ -3,9 +3,10 @@
 import logging
 import re
 import subprocess
+from collections import deque
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QThread, QTimer, QRegularExpression
+from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import (
     QFont,
     QColor,
@@ -28,7 +29,6 @@ from PySide6.QtWidgets import (
 )
 
 from core.adb_client import ADBClient
-from utils.helpers import parse_logcat_line
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,8 @@ LEVEL_COLORS = {
 TAG_COLOR = QColor("#00BCD4")
 TIMESTAMP_COLOR = QColor("#666666")
 DEFAULT_COLOR = QColor("#CCCCCC")
+
+LEVEL_ORDER = "VDIWEFA"
 
 # Regex matching logcat threadtime format
 LOGCAT_RE = re.compile(
@@ -126,9 +128,9 @@ class LogcatHighlighter(QSyntaxHighlighter):
 
 
 class LogcatReader(QThread):
-    """Read logcat output line by line and emit signals."""
+    """Read logcat in background, filter there, emit pre-filtered batches."""
 
-    line_received = Signal(str)
+    batch_ready = Signal(list)
     error_occurred = Signal(str)
 
     def __init__(self, adb: ADBClient, parent=None) -> None:
@@ -137,17 +139,54 @@ class LogcatReader(QThread):
         self._process: subprocess.Popen | None = None
         self._running = False
 
+        # Filter state (set from GUI thread, read from worker thread)
+        self.min_level_idx = 0
+        self.tag_filter = ""
+        self.pid_filter = ""
+        self.search_filter = ""
+
     def run(self) -> None:
         self._running = True
+        batch: list[str] = []
         try:
             self._process = self._adb.stream_logcat()
-            if self._process.stdout:
-                for line in self._process.stdout:
-                    if not self._running:
-                        break
-                    self.line_received.emit(line.rstrip("\n"))
+            if not self._process.stdout:
+                return
+            for raw_line in self._process.stdout:
+                if not self._running:
+                    break
+                line = raw_line.rstrip("\n")
+                if self._passes_filter(line):
+                    batch.append(line)
+                # Emit batch every 200 lines or when buffer has content
+                if len(batch) >= 200:
+                    self.batch_ready.emit(batch)
+                    batch = []
+            # Emit remaining
+            if batch and self._running:
+                self.batch_ready.emit(batch)
         except Exception as e:
-            self.error_occurred.emit(str(e))
+            if self._running:
+                self.error_occurred.emit(str(e))
+
+    def _passes_filter(self, line: str) -> bool:
+        """Filter on the worker thread to avoid GUI overhead."""
+        m = LOGCAT_RE.match(line)
+        if m:
+            level = m.group(4)
+            if LEVEL_ORDER.index(level) < self.min_level_idx:
+                return False
+            tf = self.tag_filter
+            if tf and tf not in m.group(5).lower():
+                return False
+            pf = self.pid_filter
+            if pf and m.group(2) != pf:
+                return False
+
+        sf = self.search_filter
+        if sf and sf not in line.lower():
+            return False
+        return True
 
     def stop(self) -> None:
         self._running = False
@@ -168,7 +207,8 @@ class LogcatTab(QWidget):
 
     status_message = Signal(str)
 
-    LEVEL_ORDER = "VDIWEFA"
+    # Max lines to insert per flush to keep UI responsive
+    _FLUSH_BATCH_LIMIT = 500
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -176,15 +216,15 @@ class LogcatTab(QWidget):
         self._reader: LogcatReader | None = None
         self._paused = False
         self._auto_scroll = True
-        self._lines: list[str] = []
+        self._line_count = 0
         self._max_lines = 10000
-        self._pending: list[str] = []
+        self._pending: deque[str] = deque()
         self._font_size = 11
         self._build_ui()
 
-        # Batch flush timer — collects lines and flushes every 50ms
+        # Batch flush timer — collects lines and flushes every 60ms
         self._flush_timer = QTimer(self)
-        self._flush_timer.setInterval(50)
+        self._flush_timer.setInterval(60)
         self._flush_timer.timeout.connect(self._flush_pending)
 
     def set_adb(self, adb: ADBClient) -> None:
@@ -206,24 +246,28 @@ class LogcatTab(QWidget):
         self._level_combo.addItem("Error", "E")
         self._level_combo.addItem("Fatal", "F")
         self._level_combo.setCurrentIndex(0)
+        self._level_combo.currentIndexChanged.connect(self._sync_filters)
         filter_row.addWidget(self._level_combo)
 
         filter_row.addWidget(QLabel("Tag:"))
         self._tag_filter = QLineEdit()
         self._tag_filter.setPlaceholderText("Filter by tag...")
         self._tag_filter.setMaximumWidth(150)
+        self._tag_filter.textChanged.connect(self._sync_filters)
         filter_row.addWidget(self._tag_filter)
 
         filter_row.addWidget(QLabel("PID:"))
         self._pid_filter = QLineEdit()
         self._pid_filter.setPlaceholderText("PID...")
         self._pid_filter.setMaximumWidth(80)
+        self._pid_filter.textChanged.connect(self._sync_filters)
         filter_row.addWidget(self._pid_filter)
 
         filter_row.addWidget(QLabel("Search:"))
         self._search_filter = QLineEdit()
         self._search_filter.setPlaceholderText("Search text...")
         self._search_filter.setMaximumWidth(200)
+        self._search_filter.textChanged.connect(self._sync_filters)
         filter_row.addWidget(self._search_filter)
 
         filter_row.addStretch()
@@ -317,6 +361,18 @@ class LogcatTab(QWidget):
 
         layout.addLayout(ctrl_row)
 
+    # --- Filter sync (push filters to worker thread) ---
+
+    def _sync_filters(self) -> None:
+        """Push current filter values to the reader thread."""
+        if not self._reader:
+            return
+        level_data = self._level_combo.currentData()
+        self._reader.min_level_idx = LEVEL_ORDER.index(level_data)
+        self._reader.tag_filter = self._tag_filter.text().strip().lower()
+        self._reader.pid_filter = self._pid_filter.text().strip()
+        self._reader.search_filter = self._search_filter.text().strip().lower()
+
     # --- Font / display controls ---
 
     def _on_font_size_changed(self, size: int) -> None:
@@ -342,7 +398,8 @@ class LogcatTab(QWidget):
         if not self._adb or self._reader:
             return
         self._reader = LogcatReader(self._adb)
-        self._reader.line_received.connect(self._on_line)
+        self._sync_filters()
+        self._reader.batch_ready.connect(self._on_batch)
         self._reader.error_occurred.connect(
             lambda e: self.status_message.emit(f"Logcat error: {e}")
         )
@@ -372,76 +429,42 @@ class LogcatTab(QWidget):
 
     # --- Line processing (batched) ---
 
-    def _on_line(self, line: str) -> None:
-        """Buffer incoming lines. Actual display happens in _flush_pending."""
-        self._lines.append(line)
-        if len(self._lines) > self._max_lines:
-            self._lines = self._lines[-self._max_lines:]
-
+    def _on_batch(self, lines: list[str]) -> None:
+        """Receive a pre-filtered batch from the worker thread."""
+        self._line_count += len(lines)
         if self._paused:
             return
-
-        if self._should_show(line):
-            self._pending.append(line)
+        self._pending.extend(lines)
 
     def _flush_pending(self) -> None:
-        """Flush buffered lines to the display in one batch — called by timer."""
+        """Flush buffered lines to the display — capped per tick for responsiveness."""
         if not self._pending:
             return
 
-        batch = self._pending
-        self._pending = []
+        # Take at most _FLUSH_BATCH_LIMIT lines per tick
+        count = min(len(self._pending), self._FLUSH_BATCH_LIMIT)
+        batch = [self._pending.popleft() for _ in range(count)]
 
-        # Block signals on highlighter during bulk insert for speed
-        self._highlighter.blockSignals(True)
+        # Disable viewport updates during bulk insert (highlighter still runs per-block)
         self._output.setUpdatesEnabled(False)
 
         cursor = self._output.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-
-        # Join all lines and insert as single block
-        text = "\n".join(batch)
-        cursor.insertText(text + "\n")
+        cursor.insertText("\n".join(batch) + "\n")
 
         self._output.setUpdatesEnabled(True)
-        self._highlighter.blockSignals(False)
 
-        # Re-highlight the newly inserted blocks
-        self._highlighter.rehighlight()
-
-        self._count_label.setText(f"{len(self._lines)} lines")
-        self._rate_label.setText(f"+{len(batch)}")
+        self._count_label.setText(f"{self._line_count} lines")
+        self._rate_label.setText(f"+{count}")
 
         if self._auto_scroll:
             self._output.moveCursor(QTextCursor.MoveOperation.End)
-
-    def _should_show(self, line: str) -> bool:
-        """Check if a line passes the current filters."""
-        min_level = self._level_combo.currentData()
-        m = LOGCAT_RE.match(line)
-
-        if m:
-            level = m.group(4)
-            if self.LEVEL_ORDER.index(level) < self.LEVEL_ORDER.index(min_level):
-                return False
-            tag_filter = self._tag_filter.text().strip().lower()
-            if tag_filter and tag_filter not in m.group(5).lower():
-                return False
-            pid_filter = self._pid_filter.text().strip()
-            if pid_filter and m.group(2) != pid_filter:
-                return False
-
-        search = self._search_filter.text().strip().lower()
-        if search and search not in line.lower():
-            return False
-
-        return True
 
     # --- Actions ---
 
     def _clear(self) -> None:
         self._output.clear()
-        self._lines.clear()
+        self._line_count = 0
         self._pending.clear()
         self._count_label.setText("0 lines")
         self._rate_label.setText("")
@@ -451,8 +474,10 @@ class LogcatTab(QWidget):
             self, "Export Logcat", str(Path.home() / "logcat.txt"), "Text Files (*.txt)"
         )
         if path:
-            Path(path).write_text("\n".join(self._lines), encoding="utf-8")
-            self.status_message.emit(f"Exported {len(self._lines)} lines to {path}")
+            text = self._output.toPlainText()
+            Path(path).write_text(text, encoding="utf-8")
+            line_count = text.count("\n")
+            self.status_message.emit(f"Exported {line_count} lines to {path}")
 
     def cleanup(self) -> None:
         """Stop logcat reader on shutdown."""

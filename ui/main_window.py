@@ -26,6 +26,7 @@ from ui.shell_tab import ShellTab
 from ui.logcat_tab import LogcatTab
 from ui.widgets.device_selector import DeviceSelector
 from utils.config import config
+from version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("ADBOSS")
+        self.setWindowTitle(f"ADBOSS v{__version__}")
         self.setMinimumSize(900, 600)
         self.resize(
             config.get("window_width", 1100),
@@ -120,6 +121,7 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self._device_selector.device_changed.connect(self._on_device_changed)
+        self._tabs.currentChanged.connect(self._on_tab_changed)
 
         # Status messages from tabs
         self._control.status_message.connect(self._show_status)
@@ -127,6 +129,12 @@ class MainWindow(QMainWindow):
         self._files.status_message.connect(self._show_status)
         self._shell.status_message.connect(self._show_status)
         self._logcat.status_message.connect(self._show_status)
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Auto-refresh apps when switching to the Apps tab."""
+        widget = self._tabs.widget(index)
+        if widget is self._apps and self._adb.device_serial and not self._apps._packages:
+            self._apps.refresh()
 
     def _on_device_changed(self, serial: str = "") -> None:
         """Handle device selection change."""
@@ -160,6 +168,14 @@ class MainWindow(QMainWindow):
 
         self._files.init_paths()
 
+        # Clear cached packages so Apps tab reloads for the new device
+        self._apps._packages.clear()
+        self._apps._table.setRowCount(0)
+
+        # If already on Apps tab, load immediately
+        if self._tabs.currentWidget() is self._apps:
+            self._apps.refresh()
+
     def _refresh_dashboard(self) -> None:
         """Start a monitoring cycle."""
         if not self._adb.device_serial:
@@ -189,7 +205,7 @@ class MainWindow(QMainWindow):
             "About ADBOSS",
             "<h2>ADBOSS</h2>"
             "<p>Android Debug Bridge Desktop Manager</p>"
-            "<p>Version 1.0.0</p>"
+            f"<p>Version {__version__}</p>"
             "<hr>"
             "<p>\u00a9 2026 Martin Pfeffer | celox.io</p>",
         )
@@ -199,12 +215,25 @@ class MainWindow(QMainWindow):
         config.set("window_width", self.width())
         config.set("window_height", self.height())
 
+        # Stop timers first to prevent new work being scheduled
         self._refresh_timer.stop()
         self._device_selector.stop_polling()
 
+        # Disconnect monitor signals before stopping to avoid emitting to destroyed widgets
         if self._monitor:
+            try:
+                self._monitor.device_info_updated.disconnect()
+                self._monitor.battery_updated.disconnect()
+                self._monitor.memory_updated.disconnect()
+                self._monitor.storage_updated.disconnect()
+                self._monitor.network_updated.disconnect()
+                self._monitor.display_info_updated.disconnect()
+                self._monitor.error_occurred.disconnect()
+            except RuntimeError:
+                pass
             self._monitor.stop()
 
+        self._apps.cleanup()
         self._logcat.cleanup()
         self._adb.cleanup()
 

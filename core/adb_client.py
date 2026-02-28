@@ -216,6 +216,26 @@ class ADBClient:
                 info["installed"] = stripped.split("=", 1)[1]
         return info
 
+    def get_all_package_info(self) -> dict[str, dict]:
+        """Get version info for ALL packages in a single ADB call."""
+        output = self._shell("dumpsys package packages", timeout=30)
+        result: dict[str, dict] = {}
+        current_pkg: str | None = None
+        for line in output.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("Package ["):
+                try:
+                    current_pkg = stripped[stripped.index("[") + 1:stripped.index("]")]
+                    result[current_pkg] = {"package": current_pkg}
+                except ValueError:
+                    current_pkg = None
+            elif current_pkg and current_pkg in result:
+                if stripped.startswith("versionName="):
+                    result[current_pkg]["version"] = stripped.split("=", 1)[1]
+                elif stripped.startswith("firstInstallTime="):
+                    result[current_pkg]["installed"] = stripped.split("=", 1)[1]
+        return result
+
     def install_apk(self, apk_path: str) -> str:
         """Install an APK file."""
         output = self._run(["install", "-r", apk_path], timeout=120)

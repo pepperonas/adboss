@@ -31,6 +31,8 @@ class DeviceMonitor(QThread):
         self._running = True
         try:
             info = self.adb.get_device_info()
+            if not self._running:
+                return
             if info.get("model"):
                 self.device_info_updated.emit(info)
             else:
@@ -38,28 +40,41 @@ class DeviceMonitor(QThread):
                 return
 
             battery = self.adb.get_battery_info()
+            if not self._running:
+                return
             self.battery_updated.emit(battery)
 
             memory = self.adb.get_memory_info()
+            if not self._running:
+                return
             self.memory_updated.emit(memory)
 
             storage = self.adb.get_storage_info()
+            if not self._running:
+                return
             self.storage_updated.emit(storage)
 
             cpu = self.adb.get_cpu_info()
+            if not self._running:
+                return
             self.cpu_updated.emit(cpu)
 
             network = self.adb.get_network_info()
+            if not self._running:
+                return
             self.network_updated.emit(network)
 
             display = self.adb.get_display_info()
+            if not self._running:
+                return
             self.display_info_updated.emit(display)
 
         except Exception as e:
-            logger.exception("Monitor error")
-            self.error_occurred.emit(str(e))
+            if self._running:
+                logger.exception("Monitor error")
+                self.error_occurred.emit(str(e))
 
     def stop(self) -> None:
         self._running = False
         self.quit()
-        self.wait(2000)
+        self.wait(3000)

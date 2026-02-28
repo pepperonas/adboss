@@ -30,26 +30,43 @@ logger = logging.getLogger(__name__)
 
 
 class PackageLoader(QThread):
-    """Load packages in a background thread."""
+    """Load packages in a background thread (two-phase: names first, then details)."""
 
-    finished = Signal(list)
+    packages_ready = Signal(list)   # Phase 1: package names (fast)
+    details_ready = Signal(list)    # Phase 2: with version info
 
     def __init__(self, adb: ADBClient, include_system: bool, parent=None) -> None:
         super().__init__(parent)
         self.adb = adb
         self.include_system = include_system
+        self._running = True
 
     def run(self) -> None:
         try:
             packages = self.adb.list_packages(self.include_system)
-            result = []
+            # Phase 1: emit names immediately so the table populates fast
+            quick = [{"package": pkg} for pkg in packages]
+            self.packages_ready.emit(quick)
+
+            if not self._running:
+                return
+
+            # Phase 2: single ADB call to get all version info
+            all_info = self.adb.get_all_package_info()
+            detailed = []
             for pkg in packages:
-                info = self.adb.get_package_info(pkg)
-                result.append(info)
-            self.finished.emit(result)
+                if pkg in all_info:
+                    detailed.append(all_info[pkg])
+                else:
+                    detailed.append({"package": pkg})
+            if self._running:
+                self.details_ready.emit(detailed)
         except Exception as e:
             logger.exception("Failed to load packages")
-            self.finished.emit([])
+            self.packages_ready.emit([])
+
+    def stop(self) -> None:
+        self._running = False
 
 
 class PermissionsDialog(QDialog):
@@ -184,13 +201,25 @@ class AppsTab(QWidget):
         """Reload the package list."""
         if not self._adb:
             return
+        if self._loader and self._loader.isRunning():
+            self._loader.stop()
+            self._loader.quit()
+            self._loader.wait(2000)
         self.status_message.emit("Loading packages...")
         include_system = self._system_check.isChecked()
         self._loader = PackageLoader(self._adb, include_system)
-        self._loader.finished.connect(self._on_packages_loaded)
+        self._loader.packages_ready.connect(self._on_packages_ready)
+        self._loader.details_ready.connect(self._on_details_ready)
         self._loader.start()
 
-    def _on_packages_loaded(self, packages: list[dict]) -> None:
+    def _on_packages_ready(self, packages: list[dict]) -> None:
+        """Phase 1: show package names immediately."""
+        self._packages = sorted(packages, key=lambda p: p.get("package", ""))
+        self._populate_table(self._packages)
+        self.status_message.emit(f"{len(packages)} packages — loading details...")
+
+    def _on_details_ready(self, packages: list[dict]) -> None:
+        """Phase 2: update table with version info."""
         self._packages = sorted(packages, key=lambda p: p.get("package", ""))
         self._populate_table(self._packages)
         self.status_message.emit(f"Loaded {len(packages)} packages")
@@ -285,3 +314,10 @@ class AppsTab(QWidget):
             result = self._adb.install_apk(path)
             self.status_message.emit(f"Install: {result}")
             self.refresh()
+
+    def cleanup(self) -> None:
+        """Stop background loader on shutdown."""
+        if self._loader and self._loader.isRunning():
+            self._loader.stop()
+            self._loader.quit()
+            self._loader.wait(2000)
