@@ -361,6 +361,15 @@ class ADBClient:
             self._screenrecord_proc = None
             return True
 
+    # --- Process Info ---
+
+    def get_pids_for_package(self, package: str) -> list[str]:
+        """Return PIDs for a running package via `pidof`."""
+        output = self._shell(f"pidof {package}").strip()
+        if not output:
+            return []
+        return output.split()
+
     # --- Shell & Logcat ---
 
     def execute_shell(self, command: str, timeout: int = 30) -> str:
@@ -377,6 +386,40 @@ class ADBClient:
         return subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
         )
+
+    # --- WiFi ADB ---
+
+    def connect_wifi(self, ip: str, port: int = 5555) -> str:
+        """Connect to a device over WiFi."""
+        return self._run(["connect", f"{ip}:{port}"], timeout=10).strip()
+
+    def disconnect_wifi(self, ip: str, port: int = 5555) -> str:
+        """Disconnect a WiFi-connected device."""
+        return self._run(["disconnect", f"{ip}:{port}"], timeout=10).strip()
+
+    def enable_tcpip(self, port: int = 5555) -> str:
+        """Switch a USB-connected device to TCP/IP mode."""
+        return self._run(["tcpip", str(port)], timeout=10).strip()
+
+    # --- Settings ---
+
+    def list_settings(self, namespace: str) -> dict[str, str]:
+        """List all settings in a namespace (system/secure/global)."""
+        output = self._shell(f"settings list {namespace}", timeout=15)
+        result: dict[str, str] = {}
+        for line in output.splitlines():
+            if "=" in line:
+                key, _, value = line.partition("=")
+                result[key.strip()] = value.strip()
+        return result
+
+    def get_setting(self, namespace: str, key: str) -> str:
+        """Get a single setting value."""
+        return self._shell(f"settings get {namespace} {key}").strip()
+
+    def put_setting(self, namespace: str, key: str, value: str) -> str:
+        """Set a setting value."""
+        return self._shell(f"settings put {namespace} {key} {value}").strip()
 
     # --- Input Simulation ---
 

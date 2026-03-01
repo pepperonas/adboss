@@ -120,3 +120,29 @@ class TestListPackages:
         mock_result.stdout = ""
         packages = client.list_packages()
         assert packages == []
+
+
+class TestGetPidsForPackage:
+    def test_single_pid(self, mock_adb):
+        client, mock_sub, mock_result = mock_adb
+        mock_result.stdout = "12345\n"
+        pids = client.get_pids_for_package("com.example.app")
+        assert pids == ["12345"]
+
+    def test_multiple_pids(self, mock_adb):
+        client, mock_sub, mock_result = mock_adb
+        mock_result.stdout = "12345 67890 11111\n"
+        pids = client.get_pids_for_package("com.example.app")
+        assert pids == ["12345", "67890", "11111"]
+
+    def test_empty_output(self, mock_adb):
+        client, mock_sub, mock_result = mock_adb
+        mock_result.stdout = ""
+        pids = client.get_pids_for_package("com.example.notrunning")
+        assert pids == []
+
+    def test_whitespace_only(self, mock_adb):
+        client, mock_sub, mock_result = mock_adb
+        mock_result.stdout = "  \n"
+        pids = client.get_pids_for_package("com.example.app")
+        assert pids == []

@@ -73,6 +73,9 @@ class DragTreeWidget(QTreeWidget):
             if is_from_remote != self._is_remote:
                 event.acceptProposedAction()
                 return
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
         event.ignore()
 
     def dragMoveEvent(self, event) -> None:
@@ -81,6 +84,9 @@ class DragTreeWidget(QTreeWidget):
             if is_from_remote != self._is_remote:
                 event.acceptProposedAction()
                 return
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
         event.ignore()
 
 
@@ -134,6 +140,16 @@ class FileBrowser(QWidget):
                 self.file_dropped.emit(source_path, self._current_path)
                 event.acceptProposedAction()
                 return True
+            if mime.hasUrls():
+                local_path = mime.urls()[0].toLocalFile()
+                if local_path:
+                    if self._is_remote:
+                        self.file_dropped.emit(local_path, self._current_path)
+                    else:
+                        parent = str(Path(local_path).parent)
+                        self.path_changed.emit(parent)
+                    event.acceptProposedAction()
+                    return True
         return super().eventFilter(obj, event)
 
     def set_path(self, path: str) -> None:

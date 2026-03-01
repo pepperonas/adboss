@@ -225,7 +225,7 @@ class LogcatReader(QThread):
         # Filter state (set from GUI thread, read from worker thread)
         self.min_level_idx = 0
         self.tag_filter = ""
-        self.pid_filter = ""
+        self.pid_set: set[str] = set()  # empty = no filter
         self.search_filter = ""
 
     def run(self) -> None:
@@ -265,8 +265,8 @@ class LogcatReader(QThread):
             tf = self.tag_filter
             if tf and tf not in m.group(5).lower():
                 return False
-            pf = self.pid_filter
-            if pf and m.group(2) != pf:
+            ps = self.pid_set
+            if ps and m.group(2) not in ps:
                 return False
 
         sf = self.search_filter
@@ -288,6 +288,21 @@ class LogcatReader(QThread):
         self.wait(2000)
 
 
+class PackageLoaderThread(QThread):
+    """Load installed packages in background."""
+
+    packages_loaded = Signal(list)
+
+    def __init__(self, adb: ADBClient, parent=None) -> None:
+        super().__init__(parent)
+        self._adb = adb
+
+    def run(self) -> None:
+        packages = self._adb.list_packages()
+        packages.sort()
+        self.packages_loaded.emit(packages)
+
+
 class LogcatTab(QWidget):
     """High-performance live logcat viewer with filtering, font controls, and export."""
 
@@ -306,12 +321,19 @@ class LogcatTab(QWidget):
         self._max_lines = 10000
         self._pending: deque[str] = deque()
         self._font_size = 11
+        self._pkg_loader: PackageLoaderThread | None = None
+        self._selected_app = ""
         self._build_ui()
 
         # Batch flush timer — collects lines and flushes every 60ms
         self._flush_timer = QTimer(self)
         self._flush_timer.setInterval(60)
         self._flush_timer.timeout.connect(self._flush_pending)
+
+        # PID refresh timer — re-resolves PIDs for selected app every 5s
+        self._pid_refresh_timer = QTimer(self)
+        self._pid_refresh_timer.setInterval(5000)
+        self._pid_refresh_timer.timeout.connect(self._refresh_app_pids)
 
     def set_adb(self, adb: ADBClient) -> None:
         self._adb = adb
@@ -341,6 +363,16 @@ class LogcatTab(QWidget):
         self._tag_filter.setMaximumWidth(150)
         self._tag_filter.textChanged.connect(self._sync_filters)
         filter_row.addWidget(self._tag_filter)
+
+        filter_row.addWidget(QLabel("App:"))
+        self._app_combo = QComboBox()
+        self._app_combo.setEditable(True)
+        self._app_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self._app_combo.addItem("All")
+        self._app_combo.setMinimumWidth(180)
+        self._app_combo.setMaximumWidth(300)
+        self._app_combo.currentTextChanged.connect(self._on_app_changed)
+        filter_row.addWidget(self._app_combo)
 
         filter_row.addWidget(QLabel("PID:"))
         self._pid_filter = QLineEdit()
@@ -471,8 +503,64 @@ class LogcatTab(QWidget):
         level_data = self._level_combo.currentData()
         self._reader.min_level_idx = LEVEL_ORDER.index(level_data)
         self._reader.tag_filter = self._tag_filter.text().strip().lower()
-        self._reader.pid_filter = self._pid_filter.text().strip()
+        # App filter takes priority over manual PID
+        if self._selected_app:
+            pass  # pid_set managed by _refresh_app_pids
+        else:
+            pid_text = self._pid_filter.text().strip()
+            self._reader.pid_set = {pid_text} if pid_text else set()
         self._reader.search_filter = self._search_filter.text().strip().lower()
+
+    # --- App filter ---
+
+    def _on_app_changed(self, text: str) -> None:
+        """Handle app selection change."""
+        if text == "All" or not text or text not in [
+            self._app_combo.itemText(i) for i in range(self._app_combo.count())
+        ]:
+            self._selected_app = ""
+            self._pid_filter.setEnabled(True)
+            self._pid_refresh_timer.stop()
+            if self._reader:
+                pid_text = self._pid_filter.text().strip()
+                self._reader.pid_set = {pid_text} if pid_text else set()
+        else:
+            self._selected_app = text
+            self._pid_filter.setEnabled(False)
+            self._refresh_app_pids()
+            self._pid_refresh_timer.start()
+
+    def _refresh_app_pids(self) -> None:
+        """Resolve PIDs for the selected app and push to reader."""
+        if not self._adb or not self._selected_app or not self._reader:
+            return
+        pids = self._adb.get_pids_for_package(self._selected_app)
+        self._reader.pid_set = set(pids) if pids else {"__no_match__"}
+
+    def _load_packages(self) -> None:
+        """Load installed packages in background."""
+        if not self._adb or self._pkg_loader:
+            return
+        self._pkg_loader = PackageLoaderThread(self._adb, self)
+        self._pkg_loader.packages_loaded.connect(self._on_packages_loaded)
+        self._pkg_loader.finished.connect(self._on_pkg_loader_done)
+        self._pkg_loader.start()
+
+    def _on_packages_loaded(self, packages: list[str]) -> None:
+        """Populate app combo with loaded packages."""
+        current = self._app_combo.currentText()
+        self._app_combo.blockSignals(True)
+        self._app_combo.clear()
+        self._app_combo.addItem("All")
+        self._app_combo.addItems(packages)
+        # Restore previous selection if still valid
+        idx = self._app_combo.findText(current)
+        if idx >= 0:
+            self._app_combo.setCurrentIndex(idx)
+        self._app_combo.blockSignals(False)
+
+    def _on_pkg_loader_done(self) -> None:
+        self._pkg_loader = None
 
     # --- Font / display controls ---
 
@@ -498,6 +586,9 @@ class LogcatTab(QWidget):
         """Start streaming logcat."""
         if not self._adb or self._reader:
             return
+        # Load packages if combo is still empty (only "All")
+        if self._app_combo.count() <= 1:
+            self._load_packages()
         self._reader = LogcatReader(self._adb)
         self._sync_filters()
         self._reader.batch_ready.connect(self._on_batch)
@@ -513,6 +604,7 @@ class LogcatTab(QWidget):
     def stop_logcat(self) -> None:
         """Stop streaming logcat."""
         self._flush_timer.stop()
+        self._pid_refresh_timer.stop()
         self._flush_pending()
         if self._reader:
             self._reader.stop()

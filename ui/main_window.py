@@ -3,7 +3,7 @@
 import logging
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QIcon, QAction
+from PySide6.QtGui import QIcon, QAction, QKeySequence
 from PySide6.QtWidgets import (
     QMainWindow,
     QTabWidget,
@@ -24,6 +24,8 @@ from ui.apps_tab import AppsTab
 from ui.files_tab import FilesTab
 from ui.shell_tab import ShellTab
 from ui.logcat_tab import LogcatTab
+from ui.input_tab import InputTab
+from ui.settings_tab import SettingsTab
 from ui.widgets.device_selector import DeviceSelector
 from utils.config import config
 from version import __version__
@@ -71,6 +73,7 @@ class MainWindow(QMainWindow):
         header.addStretch()
 
         self._device_selector = DeviceSelector()
+        self._device_selector.set_shared_adb(self._adb)
         header.addWidget(self._device_selector)
         main_layout.addLayout(header)
 
@@ -84,6 +87,8 @@ class MainWindow(QMainWindow):
         self._files = FilesTab()
         self._shell = ShellTab()
         self._logcat = LogcatTab()
+        self._input = InputTab()
+        self._settings = SettingsTab()
 
         self._tabs.addTab(self._dashboard, "Dashboard")
         self._tabs.addTab(self._control, "Control")
@@ -91,6 +96,8 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._files, "Files")
         self._tabs.addTab(self._shell, "Shell")
         self._tabs.addTab(self._logcat, "Logcat")
+        self._tabs.addTab(self._input, "Input")
+        self._tabs.addTab(self._settings, "Settings")
 
         main_layout.addWidget(self._tabs)
 
@@ -113,11 +120,66 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
+        # View menu — tab shortcuts
+        view_menu = menu_bar.addMenu("View")
+        tab_names = [
+            "Dashboard", "Control", "Apps", "Files",
+            "Shell", "Logcat", "Input", "Settings",
+        ]
+        for i, name in enumerate(tab_names):
+            action = QAction(f"{name}", self)
+            action.setShortcut(QKeySequence(f"Ctrl+{i + 1}"))
+            idx = i
+            action.triggered.connect(lambda _, x=idx: self._tabs.setCurrentIndex(x))
+            view_menu.addAction(action)
+
+        # Tools menu — context shortcuts
+        tools_menu = menu_bar.addMenu("Tools")
+
+        refresh_action = QAction("Refresh", self)
+        refresh_action.setShortcut(QKeySequence("Ctrl+R"))
+        refresh_action.triggered.connect(self._shortcut_refresh)
+        tools_menu.addAction(refresh_action)
+
+        logcat_toggle_action = QAction("Logcat Start/Stop", self)
+        logcat_toggle_action.setShortcut(QKeySequence("Ctrl+L"))
+        logcat_toggle_action.triggered.connect(self._shortcut_logcat_toggle)
+        tools_menu.addAction(logcat_toggle_action)
+
+        logcat_clear_action = QAction("Logcat Clear", self)
+        logcat_clear_action.setShortcut(QKeySequence("Ctrl+K"))
+        logcat_clear_action.triggered.connect(self._logcat._clear)
+        tools_menu.addAction(logcat_clear_action)
+
+        screenshot_action = QAction("Screenshot", self)
+        screenshot_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        screenshot_action.triggered.connect(self._files._take_screenshot)
+        tools_menu.addAction(screenshot_action)
+
         # Help menu
         help_menu = menu_bar.addMenu("Help")
         about_action = QAction("About", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+
+    def _shortcut_refresh(self) -> None:
+        """Context-dependent refresh: Dashboard, Apps, Files, or Settings."""
+        current = self._tabs.currentWidget()
+        if current is self._dashboard:
+            self._refresh_dashboard()
+        elif current is self._apps:
+            self._apps.refresh()
+        elif current is self._files:
+            self._files.init_paths()
+        elif current is self._settings:
+            self._settings.refresh()
+
+    def _shortcut_logcat_toggle(self) -> None:
+        """Toggle logcat start/stop."""
+        if self._logcat._reader and self._logcat._reader.isRunning():
+            self._logcat.stop_logcat()
+        else:
+            self._logcat.start_logcat()
 
     def _connect_signals(self) -> None:
         self._device_selector.device_changed.connect(self._on_device_changed)
@@ -129,6 +191,8 @@ class MainWindow(QMainWindow):
         self._files.status_message.connect(self._show_status)
         self._shell.status_message.connect(self._show_status)
         self._logcat.status_message.connect(self._show_status)
+        self._input.status_message.connect(self._show_status)
+        self._settings.status_message.connect(self._show_status)
 
     def _on_tab_changed(self, index: int) -> None:
         """Auto-refresh apps when switching to the Apps tab."""
@@ -159,6 +223,8 @@ class MainWindow(QMainWindow):
         self._files.set_adb(self._adb)
         self._shell.set_adb(self._adb)
         self._logcat.set_adb(self._adb)
+        self._input.set_adb(self._adb)
+        self._settings.set_adb(self._adb)
 
         self._status_label.setText(f"Connected: {serial}")
         self._refresh_dashboard()

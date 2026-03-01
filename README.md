@@ -6,11 +6,11 @@
   <img src="assets/banner.png" alt="ADBOSS — Android Debug Bridge Desktop Manager" width="800">
 </p>
 
-ADBOSS provides a unified control panel for device monitoring, system settings, app management, file transfer, shell access, and live logcat viewing — all from a single dark-themed GUI.
+ADBOSS provides a unified control panel for device monitoring, system settings, app management, file transfer, shell access, live logcat viewing, input remote control, and Android settings browsing — all from a single dark-themed GUI.
 
 <p align="center">
 
-![Version](https://img.shields.io/badge/Version-0.0.1-00BCD4?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-0.1.0-00BCD4?style=for-the-badge)
 ![CI](https://img.shields.io/github/actions/workflow/status/pepperonas/adboss/tests.yml?style=for-the-badge&logo=github&logoColor=white&label=Tests)
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Qt](https://img.shields.io/badge/Qt6-PySide6-41CD52?style=for-the-badge&logo=qt&logoColor=white)
@@ -21,9 +21,9 @@ ADBOSS provides a unified control panel for device monitoring, system settings, 
 ![GUI](https://img.shields.io/badge/GUI-Desktop%20App-00BCD4?style=flat-square)
 ![Theme](https://img.shields.io/badge/Theme-Dark%20Mode-1e1e1e?style=flat-square&labelColor=333333)
 ![Architecture](https://img.shields.io/badge/Architecture-Multi--Threaded-blueviolet?style=flat-square)
-![Lines of Code](https://img.shields.io/badge/Python-3000%2B%20Lines-blue?style=flat-square&logo=python&logoColor=white)
-![ADB Commands](https://img.shields.io/badge/ADB%20Commands-48-informational?style=flat-square)
-![Tabs](https://img.shields.io/badge/Tabs-6-00BCD4?style=flat-square)
+![Lines of Code](https://img.shields.io/badge/Python-3500%2B%20Lines-blue?style=flat-square&logo=python&logoColor=white)
+![ADB Commands](https://img.shields.io/badge/ADB%20Commands-54-informational?style=flat-square)
+![Tabs](https://img.shields.io/badge/Tabs-8-00BCD4?style=flat-square)
 ![QSS](https://img.shields.io/badge/Stylesheet-470%2B%20Lines-ff69b4?style=flat-square)
 ![No External ADB Libs](https://img.shields.io/badge/ADB%20Libs-None%20(subprocess)-success?style=flat-square)
 ![Config](https://img.shields.io/badge/Config-JSON%20Persistent-orange?style=flat-square)
@@ -94,11 +94,50 @@ Real-time device overview with auto-refresh (configurable, default 5s):
 - **Rate Indicator** — Shows lines-per-flush for throughput monitoring
 - **Export** — Save buffered logcat to `.txt` file
 
+### Input Remote Control
+- **Navigation Keys** — Home, Back, Recent Apps, Volume Up/Down/Mute, Power, Menu, Tab
+- **D-Pad** — Arrow keys (Up/Down/Left/Right) with center OK/Enter button
+- **Text Input** — Type text and send to device via `adb shell input text`; press Enter key separately
+- **Tap** — Send screen tap to arbitrary X/Y coordinates (0–9999)
+- **Swipe** — Define start/end coordinates and duration (50–5000ms) for swipe gestures
+- **Three-Panel Layout** — Navigation, Text, and Touch controls in a resizable QSplitter
+
+### Settings Browser
+- **Namespace Selector** — Browse `system`, `secure`, and `global` Android settings
+- **Live Search** — Filter settings by key name in real time
+- **Sortable Table** — Click column headers to sort alphabetically by key or value
+- **Inline Editing** — Double-click any row to populate the edit fields below
+- **Set Value** — Modify any setting with key/value input and one-click apply
+- **Background Loading** — Settings are loaded in a QThread to keep the UI responsive
+- **Auto-Refresh** — Table reloads automatically after setting a value
+
+### WiFi ADB
+- **WiFi Connect Button** — Directly in the device selector header bar
+- **Connect Dialog** — Enter IP address and port (default 5555) to connect wirelessly
+- **IP Auto-Detection** — Prefills the device's IP address when a USB device is connected
+- **Enable TCP/IP** — One-click button to switch a USB-connected device to WiFi mode (`adb tcpip 5555`)
+- **Disconnect** — Cleanly disconnect wireless devices
+- **Seamless Integration** — WiFi devices appear in the device dropdown like USB devices
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Cmd+1` … `Cmd+8` | Switch to tab 1–8 (Dashboard, Control, Apps, Files, Shell, Logcat, Input, Settings) |
+| `Cmd+R` | Context-dependent refresh (Dashboard, Apps, Files, or Settings reload) |
+| `Cmd+L` | Toggle Logcat start/stop |
+| `Cmd+K` | Clear Logcat output |
+| `Cmd+Shift+S` | Take screenshot (Files tab) |
+| `Cmd+Q` | Quit application |
+
+All shortcuts are accessible via the menu bar (File, View, Tools) and work globally regardless of which tab is active.
+
 ### General
 - **Dark Theme** — Full QSS stylesheet (470+ lines) with cyan (#00BCD4) accent color
 - **Multi-Device** — Device selector dropdown with auto-detection (polls every 3s)
+- **WiFi & USB** — Connect devices via USB cable or wirelessly over WiFi ADB
 - **Status Bar** — Connection status, last action result, copyright
-- **Responsive** — Freely resizable, minimum 900×600, window size persisted
+- **Responsive** — Freely resizable, minimum 900x600, window size persisted
 - **Graceful Shutdown** — All threads, timers, and subprocesses cleaned up on exit
 
 ---
@@ -174,6 +213,20 @@ Verify: `adb version`
 
 ## Installation
 
+There are two ways to install ADBOSS: as a standalone macOS app or in developer mode from source.
+
+### Option A: macOS App (Standalone)
+
+If you have a pre-built `ADBOSS.app` (from PyInstaller), simply copy it to your Applications folder:
+
+```bash
+cp -R dist/ADBOSS.app /Applications/
+```
+
+Then launch it from Spotlight, Launchpad, or directly from `/Applications/ADBOSS.app`.
+
+### Option B: Install from Source
+
 ```bash
 git clone https://github.com/pepperonas/adboss.git
 cd adboss
@@ -182,14 +235,122 @@ source venv/bin/activate    # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## Usage
+Run the app:
 
 ```bash
 source venv/bin/activate
 python main.py
 ```
 
-Connect your Android device via USB (with USB Debugging enabled) or via `adb connect <ip>:<port>` for wireless debugging. ADBOSS will detect the device automatically within 3 seconds.
+Connect your Android device via USB (with USB Debugging enabled) or use the WiFi button in the device selector to connect wirelessly. ADBOSS will detect the device automatically within 3 seconds.
+
+---
+
+## Developer Mode
+
+Developer mode lets you run ADBOSS directly from source with full debug logging, hot-reload capabilities, and access to all internal tooling. This is the recommended setup for contributing or debugging.
+
+### Setup
+
+```bash
+# Clone and enter the project
+git clone https://github.com/pepperonas/adboss.git
+cd adboss
+
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate    # Windows: venv\Scripts\activate
+
+# Install runtime + dev dependencies
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+```
+
+### Running in Developer Mode
+
+```bash
+# Activate the virtual environment
+source venv/bin/activate
+
+# Run with full debug logging to stdout
+python main.py
+```
+
+All ADB commands are logged at DEBUG level to the terminal, so you can see exactly what ADBOSS sends to the device:
+
+```
+2026-03-01 14:30:12 [DEBUG] core.adb_client: ADB: adb -s R5CN20XXXXX shell getprop ro.product.model
+2026-03-01 14:30:12 [DEBUG] core.adb_client: ADB: adb -s R5CN20XXXXX shell dumpsys battery
+```
+
+### Verifying Imports (No Device Required)
+
+Quick sanity check that all modules load correctly:
+
+```bash
+python -c "from ui.main_window import MainWindow; print('OK')"
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+pytest
+
+# Run with coverage report
+pytest --cov=. --cov-report=term-missing
+
+# Run a specific test file
+pytest tests/test_helpers.py -v
+```
+
+### Building the macOS App
+
+To build a standalone `.app` bundle using PyInstaller:
+
+```bash
+# Install PyInstaller (if not already)
+pip install pyinstaller
+
+# Build the app
+pyinstaller --name "ADBOSS" \
+  --windowed \
+  --icon assets/icon.icns \
+  --add-data "assets:assets" \
+  --noconfirm \
+  main.py
+
+# The app is created at dist/ADBOSS.app
+```
+
+Or use the existing spec file for reproducible builds:
+
+```bash
+pyinstaller ADBOSS.spec --noconfirm
+```
+
+Install the built app:
+
+```bash
+cp -R dist/ADBOSS.app /Applications/
+```
+
+### Adding Features
+
+1. **New ADB command** — Add a method to `core/adb_client.py`, add a parser to `utils/helpers.py` if needed
+2. **New UI control** — Add to the appropriate tab, use the `self._run(label, self._adb.method, args)` pattern for error handling + status bar feedback
+3. **New tab** — Create `ui/new_tab.py` following the existing pattern (`status_message = Signal(str)`, `set_adb()` method), register it in `ui/main_window.py`
+4. **New config key** — Add default to `DEFAULT_CONFIG` in `utils/config.py`
+5. **Long-running operation** — Must use QThread with signal emission, never block the GUI thread
+
+### Code Conventions
+
+- Every tab has a `status_message = Signal(str)` connected to the main window status bar
+- Tabs are independent; they share state only through the injected `ADBClient` instance
+- All ADB interaction goes through `ADBClient` — never call `subprocess` for ADB elsewhere
+- Version single source of truth: `version.py`
+- QSS theming in `assets/styles.qss`, accent color `#00BCD4`
+- Copyright: `(c) 2026 Martin Pfeffer | celox.io`
 
 ---
 
@@ -199,30 +360,37 @@ Connect your Android device via USB (with USB Debugging enabled) or via `adb con
 adboss/
 ├── main.py                         # Entry point
 ├── version.py                      # Semantic version (single source of truth)
-├── requirements.txt                # PySide6
+├── ADBOSS.spec                     # PyInstaller build spec
+├── requirements.txt                # PySide6 (runtime)
+├── requirements-dev.txt            # pytest, pytest-cov (development)
 ├── assets/
 │   ├── banner.png                  # README banner image
-│   ├── icon.png                    # App icon (generated)
-│   └── styles.qss                  # Dark theme stylesheet (470+ lines)
+│   ├── icon.png                    # App icon (PNG, 256x256)
+│   ├── icon.icns                   # App icon (macOS format)
+│   ├── styles.qss                  # Dark theme stylesheet (470+ lines)
+│   └── screenshots/                # README screenshots
 ├── core/
-│   ├── adb_client.py               # ADB wrapper (48 methods, all subprocess calls)
+│   ├── adb_client.py               # ADB wrapper (54 methods, all subprocess calls)
 │   ├── device_monitor.py           # QThread for periodic device stats
 │   └── file_transfer.py            # QThread for push/pull with progress
 ├── ui/
-│   ├── main_window.py              # Main window, tab container, menu, status bar
+│   ├── main_window.py              # Main window, tabs, menu, shortcuts, status bar
 │   ├── dashboard_tab.py            # Device info, battery gauge, storage bars
 │   ├── control_tab.py              # Brightness, volume, toggles, screen
 │   ├── apps_tab.py                 # Package list, install, permissions
 │   ├── files_tab.py                # Dual-pane file browser, drag & drop
 │   ├── shell_tab.py                # ADB shell terminal
 │   ├── logcat_tab.py               # Live logcat with highlighter & filters
+│   ├── input_tab.py                # Remote control: keys, text, tap, swipe
+│   ├── settings_tab.py             # Android settings browser (system/secure/global)
 │   └── widgets/
 │       ├── battery_widget.py       # Circular gauge (custom QPainter)
 │       ├── storage_widget.py       # Labeled progress bar
-│       └── device_selector.py      # Auto-refreshing device dropdown
-└── utils/
-    ├── config.py                   # JSON config (~/.adboss/config.json)
-    └── helpers.py                  # ADB output parsers (10 parse functions)
+│       └── device_selector.py      # Device dropdown + WiFi ADB connect
+├── utils/
+│   ├── config.py                   # JSON config (~/.adboss/config.json)
+│   └── helpers.py                  # ADB output parsers (10 parse functions)
+└── tests/                          # Test suite (pytest)
 ```
 
 ---
@@ -240,7 +408,7 @@ All ADB interaction goes through `core/adb_client.py`. No raw `subprocess` calls
 
 ### Threading
 
-The GUI thread never blocks. Five worker types handle ADB I/O:
+The GUI thread never blocks. Six worker types handle ADB I/O:
 
 | Worker | Type | Purpose |
 |--------|------|---------|
@@ -249,8 +417,9 @@ The GUI thread never blocks. Five worker types handle ADB I/O:
 | `PackageLoader` | One-shot QThread | Loads package list with version info |
 | `ShellWorker` | One-shot QThread | Executes single shell commands |
 | `LogcatReader` | Long-running QThread | Streams logcat lines continuously |
+| `SettingsLoaderThread` | One-shot QThread | Loads Android settings by namespace |
 
-All thread→UI communication uses Qt signals/slots.
+All thread-to-UI communication uses Qt signals/slots.
 
 ### Logcat Rendering Pipeline
 
@@ -281,7 +450,7 @@ Stored at `~/.adboss/config.json`, auto-created on first run:
 
 ## ADB Command Coverage
 
-ADBOSS wraps **48 ADB commands** across 10 categories:
+ADBOSS wraps **54 ADB commands** across 13 categories:
 
 | Category | Commands | Examples |
 |----------|----------|---------|
@@ -291,6 +460,8 @@ ADBOSS wraps **48 ADB commands** across 10 categories:
 | File Transfer | 6 | `adb push/pull`, `screencap`, `screenrecord`, `ls -la` |
 | Shell & Logcat | 2 | `adb shell`, `adb logcat` |
 | Input Simulation | 4 | `input tap/swipe/text/keyevent` |
+| WiFi ADB | 3 | `adb connect`, `adb disconnect`, `adb tcpip` |
+| Settings | 3 | `settings list`, `settings get`, `settings put` |
 | Backup | 1 | `adb backup` |
 | Developer | 2 | `setprop debug.layout`, `setprop debug.hwui.overdraw` |
 | Reboot | 1 | `adb reboot [bootloader\|recovery]` |
@@ -332,7 +503,10 @@ JetBrains Mono → Fira Code → Source Code Pro → Menlo → Consolas → mono
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| PySide6 | ≥ 6.6.0 | Qt6 GUI framework |
+| PySide6 | >= 6.6.0 | Qt6 GUI framework |
+| PyInstaller | (dev, optional) | Build standalone macOS/Windows/Linux app |
+| pytest | >= 7.0.0 (dev) | Test framework |
+| pytest-cov | >= 4.0.0 (dev) | Test coverage reporting |
 
 No external ADB libraries — all device communication uses Python's `subprocess` module for maximum control and transparency.
 
@@ -344,4 +518,4 @@ MIT
 
 ---
 
-**© 2026 Martin Pfeffer | [celox.io](https://celox.io)**
+**(c) 2026 Martin Pfeffer | [celox.io](https://celox.io)**

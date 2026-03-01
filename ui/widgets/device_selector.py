@@ -1,13 +1,118 @@
-"""Device selector dropdown with auto-refresh."""
+"""Device selector dropdown with auto-refresh and WiFi ADB connect."""
 
 import logging
 
 from PySide6.QtCore import Signal, QTimer
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QComboBox, QLabel, QPushButton
+from PySide6.QtWidgets import (
+    QWidget,
+    QHBoxLayout,
+    QVBoxLayout,
+    QComboBox,
+    QLabel,
+    QPushButton,
+    QDialog,
+    QLineEdit,
+    QSpinBox,
+)
 
 from core.adb_client import ADBClient
 
 logger = logging.getLogger(__name__)
+
+
+class WiFiConnectDialog(QDialog):
+    """Dialog for connecting to a device over WiFi ADB."""
+
+    def __init__(self, shared_adb: ADBClient | None, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("WiFi ADB Connect")
+        self.setMinimumWidth(350)
+        self._shared_adb = shared_adb
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        # IP
+        ip_row = QHBoxLayout()
+        ip_row.addWidget(QLabel("IP Address:"))
+        self._ip_input = QLineEdit()
+        self._ip_input.setPlaceholderText("192.168.x.x")
+        ip_row.addWidget(self._ip_input)
+        layout.addLayout(ip_row)
+
+        # Port
+        port_row = QHBoxLayout()
+        port_row.addWidget(QLabel("Port:"))
+        self._port_input = QSpinBox()
+        self._port_input.setRange(1, 65535)
+        self._port_input.setValue(5555)
+        port_row.addWidget(self._port_input)
+        layout.addLayout(port_row)
+
+        # Prefill IP from connected USB device
+        if self._shared_adb and self._shared_adb.device_serial:
+            ip = self._shared_adb.execute_shell("ip route").strip()
+            for line in ip.splitlines():
+                parts = line.split()
+                if "src" in parts:
+                    idx = parts.index("src")
+                    if idx + 1 < len(parts):
+                        self._ip_input.setText(parts[idx + 1])
+                        break
+
+        # Enable TCP/IP button
+        self._tcpip_btn = QPushButton("Enable TCP/IP on USB device")
+        self._tcpip_btn.setEnabled(
+            bool(self._shared_adb and self._shared_adb.device_serial
+                 and ":" not in (self._shared_adb.device_serial or ""))
+        )
+        self._tcpip_btn.clicked.connect(self._enable_tcpip)
+        layout.addWidget(self._tcpip_btn)
+
+        # Connect / Disconnect
+        btn_row = QHBoxLayout()
+        connect_btn = QPushButton("Connect")
+        connect_btn.clicked.connect(self._connect)
+        btn_row.addWidget(connect_btn)
+
+        disconnect_btn = QPushButton("Disconnect")
+        disconnect_btn.clicked.connect(self._disconnect)
+        btn_row.addWidget(disconnect_btn)
+        layout.addLayout(btn_row)
+
+        # Status
+        self._status = QLabel("")
+        self._status.setWordWrap(True)
+        layout.addWidget(self._status)
+
+    def _enable_tcpip(self) -> None:
+        if not self._shared_adb:
+            return
+        port = self._port_input.value()
+        result = self._shared_adb.enable_tcpip(port)
+        self._status.setText(f"TCP/IP: {result}")
+
+    def _connect(self) -> None:
+        ip = self._ip_input.text().strip()
+        if not ip:
+            self._status.setText("Please enter an IP address")
+            return
+        port = self._port_input.value()
+        # Use a bare ADBClient (no serial) for connect
+        adb = ADBClient()
+        result = adb.connect_wifi(ip, port)
+        self._status.setText(result)
+
+    def _disconnect(self) -> None:
+        ip = self._ip_input.text().strip()
+        if not ip:
+            self._status.setText("Please enter an IP address")
+            return
+        port = self._port_input.value()
+        adb = ADBClient()
+        result = adb.disconnect_wifi(ip, port)
+        self._status.setText(result)
 
 
 class DeviceSelector(QWidget):
@@ -18,6 +123,7 @@ class DeviceSelector(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._adb = ADBClient()
+        self._shared_adb: ADBClient | None = None
         self._devices: list[dict] = []
 
         layout = QHBoxLayout(self)
@@ -38,10 +144,25 @@ class DeviceSelector(QWidget):
         self._refresh_btn.clicked.connect(self.refresh_devices)
         layout.addWidget(self._refresh_btn)
 
+        self._wifi_btn = QPushButton("WiFi")
+        self._wifi_btn.setFixedWidth(50)
+        self._wifi_btn.setToolTip("WiFi ADB Connect")
+        self._wifi_btn.clicked.connect(self._open_wifi_dialog)
+        layout.addWidget(self._wifi_btn)
+
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self.refresh_devices)
         self._poll_timer.start(3000)
 
+        self.refresh_devices()
+
+    def set_shared_adb(self, adb: ADBClient) -> None:
+        """Set the shared ADBClient from MainWindow for WiFi features."""
+        self._shared_adb = adb
+
+    def _open_wifi_dialog(self) -> None:
+        dialog = WiFiConnectDialog(self._shared_adb, self)
+        dialog.exec()
         self.refresh_devices()
 
     def refresh_devices(self) -> None:
