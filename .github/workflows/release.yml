@@ -111,30 +111,49 @@ jobs:
 
       - name: Generate release body
         run: |
-          cat > release_body.md << 'HEADER'
-          ### Downloads
+          python3 << 'PYSCRIPT'
+          import glob, os
 
-          | File | SHA256 |
-          |------|--------|
-          HEADER
-          sed -i 's/^          //' release_body.md
-          for f in artifacts/adboss-*.sha256; do
-            while read hash name; do
-              size=$(du -h "artifacts/$name" 2>/dev/null | cut -f1 || echo "?")
-              echo "| \`$name\` ($size) | \`$hash\` |" >> release_body.md
-            done < "$f"
-          done
-          cat >> release_body.md << 'FOOTER'
+          lines = ["### Downloads", "", "| File | SHA256 |", "|------|--------|"]
 
-          ### Installation
+          for sha_file in sorted(glob.glob("artifacts/adboss-*.sha256")):
+              with open(sha_file) as f:
+                  for raw_line in f:
+                      line = raw_line.strip()
+                      if not line:
+                          continue
+                      parts = line.split(None, 1)
+                      if len(parts) != 2:
+                          continue
+                      sha256, name = parts
+                      name = name.strip()
+                      artifact_path = os.path.join("artifacts", os.path.basename(name))
+                      try:
+                          size_bytes = os.path.getsize(artifact_path)
+                          if size_bytes >= 1_000_000_000:
+                              size_str = f"{size_bytes / (1024**3):.1f} GB"
+                          elif size_bytes >= 1_000_000:
+                              size_str = f"{size_bytes / (1024**2):.1f} MB"
+                          else:
+                              size_str = f"{size_bytes / 1024:.0f} KB"
+                      except OSError:
+                          size_str = "?"
+                      lines.append(f"| `{os.path.basename(name)}` ({size_str}) | `{sha256}` |")
 
-          - **macOS**: Unzip, move `ADBOSS.app` to `/Applications/`
-          - **Linux**: Extract tarball, run `./ADBOSS`
-          - **Windows**: Unzip, run `ADBOSS.exe`
+          lines.extend([
+              "",
+              "### Installation",
+              "",
+              "- **macOS**: Unzip, move `ADBOSS.app` to `/Applications/`",
+              "- **Linux**: Extract tarball, run `./ADBOSS`",
+              "- **Windows**: Unzip, run `ADBOSS.exe`",
+              "",
+              "Requires ADB installed and in PATH. See [README](https://github.com/pepperonas/adboss#prerequisites) for details.",
+          ])
 
-          Requires ADB installed and in PATH. See [README](https://github.com/pepperonas/adboss#prerequisites) for details.
-          FOOTER
-          sed -i 's/^          //' release_body.md
+          with open("release_body.md", "w") as f:
+              f.write("\n".join(lines) + "\n")
+          PYSCRIPT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
