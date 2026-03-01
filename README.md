@@ -103,6 +103,52 @@ Real-time device overview with auto-refresh (configurable, default 5s):
 
 ---
 
+## Screenshots
+
+### Dashboard
+Real-time device info, battery gauge, RAM/storage bars, network and display info.
+
+<p align="center">
+  <img src="assets/screenshots/dashboard.png" alt="Dashboard" width="800">
+</p>
+
+### Device Control
+Battery simulation, brightness, volume sliders, toggles, screen controls, developer options.
+
+<p align="center">
+  <img src="assets/screenshots/control.png" alt="Device Control" width="800">
+</p>
+
+### App Manager
+Searchable package list with launch, force stop, uninstall, clear data, and permissions management.
+
+<p align="center">
+  <img src="assets/screenshots/apps.png" alt="App Manager" width="800">
+</p>
+
+### File Transfer
+Dual-pane browser with push/pull, screenshot capture, and screen recording.
+
+<p align="center">
+  <img src="assets/screenshots/files.png" alt="File Transfer" width="800">
+</p>
+
+### ADB Shell
+Terminal with command history, quick action buttons, and timestamped output.
+
+<p align="center">
+  <img src="assets/screenshots/shell.png" alt="ADB Shell" width="800">
+</p>
+
+### Logcat Viewer
+Live streaming with level/tag/PID filters, color-coded output, and smart auto-scroll.
+
+<p align="center">
+  <img src="assets/screenshots/logcat.png" alt="Logcat Viewer" width="800">
+</p>
+
+---
+
 ## Prerequisites
 
 - **Python 3.11+**
@@ -258,17 +304,17 @@ The dark theme is defined in `assets/styles.qss` with these design tokens:
 
 | Role | Color | Preview |
 |------|-------|---------|
-| Background | `#1e1e1e` | ![#1e1e1e](https://via.placeholder.com/12/1e1e1e/1e1e1e.png) |
-| Surface | `#252526` | ![#252526](https://via.placeholder.com/12/252526/252526.png) |
-| Widget BG | `#2d2d2d` | ![#2d2d2d](https://via.placeholder.com/12/2d2d2d/2d2d2d.png) |
-| Text | `#d4d4d4` | ![#d4d4d4](https://via.placeholder.com/12/d4d4d4/d4d4d4.png) |
-| Muted | `#888888` | ![#888888](https://via.placeholder.com/12/888888/888888.png) |
-| Accent | `#00BCD4` (Cyan) | ![#00BCD4](https://via.placeholder.com/12/00BCD4/00BCD4.png) |
-| Accent Dark | `#00838F` (Teal) | ![#00838F](https://via.placeholder.com/12/00838F/00838F.png) |
-| Success | `#4CAF50` (Green) | ![#4CAF50](https://via.placeholder.com/12/4CAF50/4CAF50.png) |
-| Warning | `#FFC107` (Amber) | ![#FFC107](https://via.placeholder.com/12/FFC107/FFC107.png) |
-| Error | `#F44336` (Red) | ![#F44336](https://via.placeholder.com/12/F44336/F44336.png) |
-| Fatal | `#E040FB` (Purple) | ![#E040FB](https://via.placeholder.com/12/E040FB/E040FB.png) |
+| Background | `#1e1e1e` | ![](https://img.shields.io/badge/-%20%20%20%20-1e1e1e?style=flat-square) |
+| Surface | `#252526` | ![](https://img.shields.io/badge/-%20%20%20%20-252526?style=flat-square) |
+| Widget BG | `#2d2d2d` | ![](https://img.shields.io/badge/-%20%20%20%20-2d2d2d?style=flat-square) |
+| Text | `#d4d4d4` | ![](https://img.shields.io/badge/-%20%20%20%20-d4d4d4?style=flat-square) |
+| Muted | `#888888` | ![](https://img.shields.io/badge/-%20%20%20%20-888888?style=flat-square) |
+| Accent | `#00BCD4` (Cyan) | ![](https://img.shields.io/badge/-%20%20%20%20-00BCD4?style=flat-square) |
+| Accent Dark | `#00838F` (Teal) | ![](https://img.shields.io/badge/-%20%20%20%20-00838F?style=flat-square) |
+| Success | `#4CAF50` (Green) | ![](https://img.shields.io/badge/-%20%20%20%20-4CAF50?style=flat-square) |
+| Warning | `#FFC107` (Amber) | ![](https://img.shields.io/badge/-%20%20%20%20-FFC107?style=flat-square) |
+| Error | `#F44336` (Red) | ![](https://img.shields.io/badge/-%20%20%20%20-F44336?style=flat-square) |
+| Fatal | `#E040FB` (Purple) | ![](https://img.shields.io/badge/-%20%20%20%20-E040FB?style=flat-square) |
 
 The stylesheet covers all Qt widgets (buttons, sliders, tabs, tables, trees, scrollbars, dialogs, menus, tooltips) for a consistent appearance.
 
