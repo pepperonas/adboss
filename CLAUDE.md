@@ -17,16 +17,28 @@ source venv/bin/activate && python main.py
 
 # Verify imports (no device needed)
 python -c "from ui.main_window import MainWindow; print('OK')"
-```
 
-No test framework is configured yet. Parsing functions in `utils/helpers.py` are pure and can be unit-tested without a device.
+# Run all tests
+pytest tests/ -v --tb=short
+
+# Run single test file / class / method
+pytest tests/test_helpers.py -v
+pytest tests/test_helpers.py::TestParseDevicesOutput -v
+pytest tests/test_helpers.py::TestParseDevicesOutput::test_multi_device -v
+
+# Coverage
+pytest --cov=. --cov-report=term-missing
+
+# Build macOS app (also: pyinstaller ADBOSS.spec --noconfirm)
+pyinstaller --name "ADBOSS" --windowed --icon assets/icon.icns --add-data "assets:assets" --noconfirm main.py
+```
 
 ## Architecture
 
 ### Layered Design
 
 ```
-main.py → MainWindow → 6 Tabs (each with own QThread workers)
+main.py → MainWindow → 8 Tabs (each with own QThread workers)
                 ↓
            ADBClient (single shared instance, all ADB goes through here)
                 ↓
@@ -45,20 +57,20 @@ Every ADB command flows through `core/adb_client.py`. Never call `subprocess` fo
 
 The GUI thread must never block. Three threading patterns are used:
 
-1. **One-shot QThread** (DeviceMonitor, PackageLoader, ShellWorker) — created per operation, collects data, emits signals, finishes
+1. **One-shot QThread** (DeviceMonitor, PackageLoader, ShellWorker, SettingsLoaderThread) — created per operation, collects data, emits signals, finishes
 2. **Long-running QThread** (LogcatReader, FileTransferWorker) — streams data continuously via signals until stopped
 3. **QTimer polling** — DeviceSelector polls `adb devices` every 3s, dashboard refreshes every 5s
 
-All thread→UI communication uses Qt signals/slots (thread-safe).
+All thread-to-UI communication uses Qt signals/slots (thread-safe).
 
 ### Device Context Flow
 
 `MainWindow` owns one `ADBClient` instance. On device switch:
 1. `ADBClient.device_serial` is updated
-2. All 6 tabs receive it via `tab.set_adb(self._adb)`
+2. All 8 tabs receive it via `tab.set_adb(self._adb)`
 3. Dashboard refresh cycle restarts
 
-`DeviceSelector` has its own separate `ADBClient` (no serial) just for polling `adb devices -l`.
+`DeviceSelector` has its own separate `ADBClient` (no serial) for polling `adb devices -l`, plus a reference to the shared ADBClient via `set_shared_adb()` for WiFi ADB features (TCP/IP switching, IP auto-detection).
 
 ### Config
 
@@ -68,12 +80,27 @@ Singleton at `utils/config.py` → persists to `~/.adboss/config.json`. Smart AD
 
 All ADB output parsing lives in `utils/helpers.py` as pure functions. ADBClient methods call the parser and return dicts. This keeps parsing testable without devices.
 
+### Tests
+
+Tests live in `tests/` using pytest. `conftest.py` provides a `mock_adb` fixture that patches subprocess and config. All tests are pure — no real ADB device needed. CI runs on Python 3.11/3.12/3.13 via `.github/workflows/tests.yml`.
+
 ## Adding Features
 
 1. New ADB command → add method to `ADBClient`, add parser to `helpers.py` if needed
 2. New UI control → add to the appropriate tab, use `self._run(label, self._adb.method, args)` pattern for error handling + status bar feedback
-3. New config key → add default to `DEFAULT_CONFIG` in `utils/config.py`
-4. Long-running operation → must use QThread with signal emission, never block GUI thread
+3. New tab → create `ui/new_tab.py` with `status_message = Signal(str)` and `set_adb()`, register in `main_window.py` (_build_ui, _connect_signals, _on_device_changed), add keyboard shortcut in `_build_menu`
+4. New config key → add default to `DEFAULT_CONFIG` in `utils/config.py`
+5. Long-running operation → must use QThread with signal emission, never block GUI thread
+
+## Keyboard Shortcuts
+
+All defined in `MainWindow._build_menu()`:
+- `Ctrl+1`..`Ctrl+8` — Switch to tab (Dashboard, Control, Apps, Files, Shell, Logcat, Input, Settings)
+- `Ctrl+R` — Context-dependent refresh (Dashboard/Apps/Files/Settings)
+- `Ctrl+L` — Logcat Start/Stop toggle
+- `Ctrl+K` — Logcat Clear
+- `Ctrl+Shift+S` — Screenshot (Files tab)
+- `Ctrl+Q` — Quit
 
 ## LogcatView Scroll Architecture
 
@@ -93,4 +120,5 @@ Do NOT simplify this logic — each piece solves a specific Qt behavior that cau
 - Tabs are independent; they share state only through the injected ADBClient
 - Version single source of truth: `version.py`
 - QSS theming in `assets/styles.qss`, accent color `#00BCD4`
-- Copyright: `© 2026 Martin Pfeffer | celox.io`
+- Copyright: `(c) 2026 Martin Pfeffer | celox.io`
+- Release workflow (`.github/workflows/release.yml`) triggers on `v*` tags, builds for macOS/Linux/Windows
