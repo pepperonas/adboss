@@ -75,9 +75,22 @@ All ADB output parsing lives in `utils/helpers.py` as pure functions. ADBClient 
 3. New config key → add default to `DEFAULT_CONFIG` in `utils/config.py`
 4. Long-running operation → must use QThread with signal emission, never block GUI thread
 
+## LogcatView Scroll Architecture
+
+`LogcatView` (QPlainTextEdit subclass in `ui/logcat_tab.py`) has critical scroll-management logic:
+
+- **Follow mode** (`_follow=True`): inserts text at document end, scrolls to bottom
+- **Frozen mode** (`_follow=False`): inserts text but preserves scroll position via `bar.setValue(old_val)` + deferred `QTimer.singleShot(0)` restore (counters async Qt `_q_adjustScrollbars`)
+- **Trimming suspended** while frozen: `maxBlockCount` is set to 0 to prevent content at the viewport from being replaced. Restored when follow re-enables.
+- **Auto-follow detection** uses `verticalScrollBar().actionTriggered` (not `valueChanged`) — only fires on real user actions (wheel, click, drag), never on programmatic `setValue()`
+- **Cursor anchoring**: `set_follow(False)` moves widget cursor into viewport to prevent `ensureCursorVisible()` from fighting scroll position
+
+Do NOT simplify this logic — each piece solves a specific Qt behavior that caused viewport drift during extensive testing.
+
 ## Key Conventions
 
 - `status_message = Signal(str)` on every tab — connected to MainWindow status bar
 - Tabs are independent; they share state only through the injected ADBClient
+- Version single source of truth: `version.py`
 - QSS theming in `assets/styles.qss`, accent color `#00BCD4`
 - Copyright: `© 2026 Martin Pfeffer | celox.io`
