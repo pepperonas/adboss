@@ -133,14 +133,57 @@ class LogcatView(QPlainTextEdit):
 
     When follow is off, preserves the user's viewport position even as
     new lines are appended and old lines are trimmed by maxBlockCount.
+    Auto-detects follow state from user scrolling (scroll up = unfollow,
+    scroll to bottom = re-follow).
     """
+
+    follow_changed = Signal(bool)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._follow = True
+        self._saved_max_blocks = 0
+        # actionTriggered fires ONLY for user actions (wheel, click, drag),
+        # never for programmatic setValue — avoids false re-follow triggers
+        self.verticalScrollBar().actionTriggered.connect(self._on_user_scroll)
 
     def set_follow(self, on: bool) -> None:
         self._follow = on
+        if not on:
+            # Disable trimming so the user's viewport is never invalidated
+            self._saved_max_blocks = self.maximumBlockCount()
+            super().setMaximumBlockCount(0)
+            # Anchor widget cursor in viewport so ensureCursorVisible()
+            # won't fight our scroll position by scrolling to the end
+            block = self.firstVisibleBlock()
+            if block.isValid():
+                c = self.textCursor()
+                c.setPosition(block.position())
+                self.setTextCursor(c)
+        else:
+            # Re-enable trimming — excess blocks are removed immediately
+            if self._saved_max_blocks > 0:
+                super().setMaximumBlockCount(self._saved_max_blocks)
+
+    def update_max_blocks(self, count: int) -> None:
+        """Set max block count. Deferred while follow is off."""
+        if self._follow:
+            super().setMaximumBlockCount(count)
+        else:
+            self._saved_max_blocks = count
+
+    def _on_user_scroll(self, _action: int) -> None:
+        """Detect follow state from user scroll actions.
+
+        Deferred because actionTriggered fires before value updates."""
+        QTimer.singleShot(0, self._check_follow_state)
+
+    def _check_follow_state(self) -> None:
+        bar = self.verticalScrollBar()
+        at_bottom = bar.value() >= bar.maximum() - 4
+        if at_bottom != self._follow:
+            self._follow = at_bottom
+            self.follow_changed.emit(at_bottom)
 
     def append_lines(self, text: str) -> None:
         """Append text. Scroll behavior controlled by _follow flag."""
@@ -152,24 +195,19 @@ class LogcatView(QPlainTextEdit):
             cursor.insertText(text)
             bar.setValue(bar.maximum())
         else:
-            # Track which block is at the top of the viewport
-            target_block = self.firstVisibleBlock().blockNumber()
+            # No trimming while follow is off (maxBlockCount is 0),
+            # so scroll value stays correct without compensation
+            old_val = bar.value()
 
             cursor = QTextCursor(self.document())
             cursor.movePosition(QTextCursor.MoveOperation.End)
             cursor.insertText(text)
 
-            # After insert (and possible trimming), scroll back to
-            # show the same block. The block number stays valid because
-            # trimming removes from the top, shifting all numbers down,
-            # but firstVisibleBlock already accounts for that.
-            block = self.document().findBlockByNumber(target_block)
-            if block.isValid():
-                cursor = QTextCursor(block)
-                # Use setTextCursor + centerOnScroll to position viewport
-                self.setTextCursor(cursor)
-                # Now ensure it's at the TOP of viewport, not centered
-                bar.setValue(target_block)
+            bar.setValue(old_val)
+
+            # Deferred restore: Qt's _q_adjustScrollbars fires async via
+            # documentSizeChanged and can override our setValue after return
+            QTimer.singleShot(0, lambda v=old_val, b=bar: b.setValue(v))
 
 
 class LogcatReader(QThread):
@@ -374,6 +412,7 @@ class LogcatTab(QWidget):
         self._output.setUndoRedoEnabled(False)
 
         self._highlighter = LogcatHighlighter(self._output.document())
+        self._output.follow_changed.connect(self._on_follow_auto_changed)
 
         layout.addWidget(self._output)
 
@@ -413,7 +452,15 @@ class LogcatTab(QWidget):
         self._auto_scroll = on
         self._output.set_follow(on)
         if on:
-            self._output.moveCursor(QTextCursor.MoveOperation.End)
+            bar = self._output.verticalScrollBar()
+            bar.setValue(bar.maximum())
+
+    def _on_follow_auto_changed(self, on: bool) -> None:
+        """Update checkbox when LogcatView auto-detects follow state change."""
+        self._auto_scroll = on
+        self._auto_scroll_check.blockSignals(True)
+        self._auto_scroll_check.setChecked(on)
+        self._auto_scroll_check.blockSignals(False)
 
     # --- Filter sync (push filters to worker thread) ---
 
@@ -443,7 +490,7 @@ class LogcatTab(QWidget):
 
     def _on_max_lines_changed(self, value: int) -> None:
         self._max_lines = value
-        self._output.setMaximumBlockCount(value)
+        self._output.update_max_blocks(value)
 
     # --- Logcat control ---
 

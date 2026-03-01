@@ -86,7 +86,7 @@ Real-time device overview with auto-refresh (configurable, default 5s):
 - **Monospaced Font** — JetBrains Mono with fallback chain (Fira Code, Source Code Pro, Menlo, Consolas)
 - **Filters** — Log level dropdown, tag filter, PID filter, free-text search — all combinable
 - **Pause/Resume** — Pause display while buffering continues
-- **Auto-Scroll** — Toggleable, enabled by default
+- **Smart Auto-Scroll** — Scroll up to freeze viewport, scroll to bottom to re-follow; trimming suspended while browsing to prevent content drift
 - **Font Size** — Adjustable via spinner (7–24 px)
 - **Line Wrap** — Toggleable word wrap
 - **Buffer Limit** — Configurable max lines (1,000–100,000), oldest lines trimmed automatically
@@ -211,9 +211,9 @@ The logcat viewer uses a high-performance rendering pipeline optimized for high-
 
 1. **LogcatReader** (QThread) — Reads lines from `adb logcat` via `subprocess.Popen`
 2. **Line buffer** — Incoming lines are filtered (level, tag, PID, text) and queued in `_pending`
-3. **Flush timer** (50ms QTimer) — Joins queued lines into a single text block and inserts at cursor end
+3. **Flush timer** (60ms QTimer) — Joins queued lines into a single text block and inserts at cursor end
 4. **LogcatHighlighter** (QSyntaxHighlighter) — Colors each line using compiled regex and cached `QTextCharFormat` objects
-5. **QPlainTextEdit** — Renders with `setMaximumBlockCount` for automatic oldest-line trimming
+5. **LogcatView** (QPlainTextEdit subclass) — Smart auto-scroll: disables trimming while viewport is frozen, re-enables on follow; deferred scroll restore to counter async Qt layout adjustments
 
 ### Configuration
 
