@@ -109,42 +109,42 @@ Real-time device overview with auto-refresh (configurable, default 5s):
 Real-time device info, battery gauge, RAM/storage bars, network and display info.
 
 <p align="center">
-  <img src="assets/screenshots/dashboard.png" alt="Dashboard" width="800">
+  <img src="assets/screenshots/dashboard.png?v=2" alt="Dashboard" width="800">
 </p>
 
 ### Device Control
 Battery simulation, brightness, volume sliders, toggles, screen controls, developer options.
 
 <p align="center">
-  <img src="assets/screenshots/control.png" alt="Device Control" width="800">
+  <img src="assets/screenshots/control.png?v=2" alt="Device Control" width="800">
 </p>
 
 ### App Manager
 Searchable package list with launch, force stop, uninstall, clear data, and permissions management.
 
 <p align="center">
-  <img src="assets/screenshots/apps.png" alt="App Manager" width="800">
+  <img src="assets/screenshots/apps.png?v=2" alt="App Manager" width="800">
 </p>
 
 ### File Transfer
 Dual-pane browser with push/pull, screenshot capture, and screen recording.
 
 <p align="center">
-  <img src="assets/screenshots/files.png" alt="File Transfer" width="800">
+  <img src="assets/screenshots/files.png?v=2" alt="File Transfer" width="800">
 </p>
 
 ### ADB Shell
 Terminal with command history, quick action buttons, and timestamped output.
 
 <p align="center">
-  <img src="assets/screenshots/shell.png" alt="ADB Shell" width="800">
+  <img src="assets/screenshots/shell.png?v=2" alt="ADB Shell" width="800">
 </p>
 
 ### Logcat Viewer
 Live streaming with level/tag/PID filters, color-coded output, and smart auto-scroll.
 
 <p align="center">
-  <img src="assets/screenshots/logcat.png" alt="Logcat Viewer" width="800">
+  <img src="assets/screenshots/logcat.png?v=2" alt="Logcat Viewer" width="800">
 </p>
 
 ---
