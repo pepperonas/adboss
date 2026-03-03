@@ -10,7 +10,7 @@ ADBOSS provides a unified control panel for device monitoring, system settings, 
 
 <p align="center">
 
-![Version](https://img.shields.io/badge/Version-0.1.0-00BCD4?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-0.2.0-00BCD4?style=for-the-badge)
 ![CI](https://img.shields.io/github/actions/workflow/status/pepperonas/adboss/tests.yml?style=for-the-badge&logo=github&logoColor=white&label=Tests)
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Qt](https://img.shields.io/badge/Qt6-PySide6-41CD52?style=for-the-badge&logo=qt&logoColor=white)
@@ -196,18 +196,28 @@ Live streaming with level/tag/PID filters, color-coded output, and smart auto-sc
 
 ### Installing ADB
 
+**macOS** (via [Homebrew](https://brew.sh)):
 ```bash
-# macOS
+# Install Homebrew if not already installed:
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install ADB:
 brew install android-platform-tools
+```
 
-# Ubuntu/Debian
+> **Note:** macOS does not have `apt`. If you see _"Unable to locate a Java Runtime that supports apt"_, you need Homebrew (above) instead.
+
+**Ubuntu/Debian:**
+```bash
 sudo apt install android-tools-adb
+```
 
-# Windows (via scoop)
+**Windows** (via [Scoop](https://scoop.sh)):
+```bash
 scoop install adb
 ```
 
-Verify: `adb version`
+Verify installation: `adb version`
 
 ---
 
@@ -215,15 +225,20 @@ Verify: `adb version`
 
 There are two ways to install ADBOSS: as a standalone macOS app or in developer mode from source.
 
-### Option A: macOS App (Standalone)
+### Option A: Pre-built App (Standalone)
 
-If you have a pre-built `ADBOSS.app` (from PyInstaller), simply copy it to your Applications folder:
+Download the latest release from [GitHub Releases](https://github.com/pepperonas/adboss/releases):
 
-```bash
-cp -R dist/ADBOSS.app /Applications/
-```
+| Platform | Architecture | File |
+|----------|-------------|------|
+| macOS | Apple Silicon (M1/M2/M3/M4) | `adboss-macos-arm64.zip` |
+| macOS | Intel | `adboss-macos-x86_64.zip` |
+| Linux | x86_64 | `adboss-linux-x86_64.tar.gz` |
+| Windows | x64 | `adboss-windows-x64.zip` |
 
-Then launch it from Spotlight, Launchpad, or directly from `/Applications/ADBOSS.app`.
+**macOS:** Unzip, move `ADBOSS.app` to `/Applications/`, launch from Spotlight or Launchpad.
+**Linux:** Extract tarball, run `./ADBOSS`.
+**Windows:** Unzip, run `ADBOSS.exe`.
 
 ### Option B: Install from Source
 

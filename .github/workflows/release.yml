@@ -17,6 +17,10 @@ jobs:
             platform: macos
             arch: arm64
             ext: zip
+          - os: macos-13
+            platform: macos
+            arch: x86_64
+            ext: zip
           - os: ubuntu-latest
             platform: linux
             arch: x86_64
@@ -144,7 +148,8 @@ jobs:
               "",
               "### Installation",
               "",
-              "- **macOS**: Unzip, move `ADBOSS.app` to `/Applications/`",
+              "- **macOS (Apple Silicon)**: Download `adboss-macos-arm64.zip`, unzip, move `ADBOSS.app` to `/Applications/`",
+              "- **macOS (Intel)**: Download `adboss-macos-x86_64.zip`, unzip, move `ADBOSS.app` to `/Applications/`",
               "- **Linux**: Extract tarball, run `./ADBOSS`",
               "- **Windows**: Unzip, run `ADBOSS.exe`",
               "",
@@ -162,5 +167,6 @@ jobs:
           body_path: release_body.md
           files: |
             artifacts/adboss-macos-arm64.zip
+            artifacts/adboss-macos-x86_64.zip
             artifacts/adboss-linux-x86_64.tar.gz
             artifacts/adboss-windows-x64.zip
