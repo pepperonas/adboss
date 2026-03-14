@@ -6,7 +6,7 @@
   <img src="assets/banner.png" alt="ADBOSS — Android Debug Bridge Desktop Manager" width="800">
 </p>
 
-ADBOSS provides a unified control panel for device monitoring, system settings, app management, file transfer, shell access, live logcat viewing, input remote control, and Android settings browsing — all from a single dark-themed GUI.
+ADBOSS provides a unified control panel for device monitoring, system settings, app management, file transfer, shell access, live logcat viewing, input remote control, Android settings browsing, and Bluetooth HCI traffic analysis — all from a single dark-themed GUI.
 
 <p align="center">
 
@@ -21,9 +21,9 @@ ADBOSS provides a unified control panel for device monitoring, system settings, 
 ![GUI](https://img.shields.io/badge/GUI-Desktop%20App-00BCD4?style=flat-square)
 ![Theme](https://img.shields.io/badge/Theme-Dark%20Mode-1e1e1e?style=flat-square&labelColor=333333)
 ![Architecture](https://img.shields.io/badge/Architecture-Multi--Threaded-blueviolet?style=flat-square)
-![Lines of Code](https://img.shields.io/badge/Python-3500%2B%20Lines-blue?style=flat-square&logo=python&logoColor=white)
-![ADB Commands](https://img.shields.io/badge/ADB%20Commands-54-informational?style=flat-square)
-![Tabs](https://img.shields.io/badge/Tabs-8-00BCD4?style=flat-square)
+![Lines of Code](https://img.shields.io/badge/Python-5500%2B%20Lines-blue?style=flat-square&logo=python&logoColor=white)
+![ADB Commands](https://img.shields.io/badge/ADB%20Commands-61-informational?style=flat-square)
+![Tabs](https://img.shields.io/badge/Tabs-9-00BCD4?style=flat-square)
 ![QSS](https://img.shields.io/badge/Stylesheet-470%2B%20Lines-ff69b4?style=flat-square)
 ![No External ADB Libs](https://img.shields.io/badge/ADB%20Libs-None%20(subprocess)-success?style=flat-square)
 ![Config](https://img.shields.io/badge/Config-JSON%20Persistent-orange?style=flat-square)
@@ -111,6 +111,22 @@ Real-time device overview with auto-refresh (configurable, default 5s):
 - **Background Loading** — Settings are loaded in a QThread to keep the UI responsive
 - **Auto-Refresh** — Table reloads automatically after setting a value
 
+### Bluetooth Analyzer
+- **HCI Snoop Capture** — Pull and parse Android's `btsnoop_hci.log` for full Bluetooth traffic analysis
+- **Live Capture Mode** — Continuously poll the device for new HCI packets (2s interval) with real-time table updates
+- **Full HCI Stack Decoding** — Commands (60+ opcodes), Events (30+ codes), ACL Data, SCO Data
+- **Protocol Dissection** — L2CAP channel routing, ATT/GATT attribute operations, SMP pairing sequences
+- **BLE Advertising Reports** — Decode advertising data structures: device name, flags, TX power, service UUIDs, manufacturer-specific data
+- **Manufacturer Identification** — Lookup table for company IDs (Apple, Samsung, Google, Xiaomi, Nordic, Bose, Tile, etc.)
+- **GATT Service/Characteristic UUIDs** — Human-readable names for standard Bluetooth SIG UUIDs (Battery, Heart Rate, Device Info, etc.)
+- **Device Discovery** — View paired and connected devices via `dumpsys bluetooth_manager`, with connection state highlighting
+- **Packet Filtering** — Filter by type (CMD/EVT/ACL/SCO), protocol (HCI/L2CAP/ATT/SMP), direction (Sent/Received), or free-text search
+- **Hex Dump View** — Toggle between decoded detail view and raw hex dump with ASCII sidebar
+- **Capture Statistics** — Packet counts by type, protocol breakdown, duration, bytes transferred, unique devices seen
+- **Export Formats** — Save captures as `.pcap` (Wireshark-compatible), `.btsnoop`, or decoded `.txt`
+- **Load Offline** — Import previously saved `.btsnoop` / `.log` files for analysis without a device
+- **HCI Snoop Control** — Enable/disable HCI logging directly from the app (sets `bluetooth_hci_log` + system properties)
+
 ### WiFi ADB
 - **WiFi Connect Button** — Directly in the device selector header bar
 - **Connect Dialog** — Enter IP address and port (default 5555) to connect wirelessly
@@ -123,8 +139,8 @@ Real-time device overview with auto-refresh (configurable, default 5s):
 
 | Shortcut | Action |
 |----------|--------|
-| `Cmd+1` … `Cmd+8` | Switch to tab 1–8 (Dashboard, Control, Apps, Files, Shell, Logcat, Input, Settings) |
-| `Cmd+R` | Context-dependent refresh (Dashboard, Apps, Files, or Settings reload) |
+| `Cmd+1` … `Cmd+9` | Switch to tab 1–9 (Dashboard, Control, Apps, Files, Shell, Logcat, Input, Settings, Bluetooth) |
+| `Cmd+R` | Context-dependent refresh (Dashboard, Apps, Files, Settings, or Bluetooth reload) |
 | `Cmd+L` | Toggle Logcat start/stop |
 | `Cmd+K` | Clear Logcat output |
 | `Cmd+Shift+S` | Take screenshot (Files tab) |
@@ -385,7 +401,8 @@ adboss/
 │   ├── styles.qss                  # Dark theme stylesheet (470+ lines)
 │   └── screenshots/                # README screenshots
 ├── core/
-│   ├── adb_client.py               # ADB wrapper (54 methods, all subprocess calls)
+│   ├── adb_client.py               # ADB wrapper (61 methods, all subprocess calls)
+│   ├── bluetooth_parser.py         # btsnoop/HCI parser, protocol decoder, pcap export
 │   ├── device_monitor.py           # QThread for periodic device stats
 │   └── file_transfer.py            # QThread for push/pull with progress
 ├── ui/
@@ -398,13 +415,14 @@ adboss/
 │   ├── logcat_tab.py               # Live logcat with highlighter & filters
 │   ├── input_tab.py                # Remote control: keys, text, tap, swipe
 │   ├── settings_tab.py             # Android settings browser (system/secure/global)
+│   ├── bluetooth_tab.py            # Bluetooth HCI capture, analysis, export
 │   └── widgets/
 │       ├── battery_widget.py       # Circular gauge (custom QPainter)
 │       ├── storage_widget.py       # Labeled progress bar
 │       └── device_selector.py      # Device dropdown + WiFi ADB connect
 ├── utils/
 │   ├── config.py                   # JSON config (~/.adboss/config.json)
-│   └── helpers.py                  # ADB output parsers (10 parse functions)
+│   └── helpers.py                  # ADB output parsers (11 parse functions)
 └── tests/                          # Test suite (pytest)
 ```
 
@@ -423,7 +441,7 @@ All ADB interaction goes through `core/adb_client.py`. No raw `subprocess` calls
 
 ### Threading
 
-The GUI thread never blocks. Six worker types handle ADB I/O:
+The GUI thread never blocks. Nine worker types handle ADB I/O:
 
 | Worker | Type | Purpose |
 |--------|------|---------|
@@ -433,6 +451,9 @@ The GUI thread never blocks. Six worker types handle ADB I/O:
 | `ShellWorker` | One-shot QThread | Executes single shell commands |
 | `LogcatReader` | Long-running QThread | Streams logcat lines continuously |
 | `SettingsLoaderThread` | One-shot QThread | Loads Android settings by namespace |
+| `BluetoothInfoWorker` | One-shot QThread | Fetches adapter info and paired devices |
+| `BtSnoopCaptureWorker` | One-shot QThread | Pulls and parses btsnoop HCI log |
+| `LiveCaptureWorker` | Long-running QThread | Periodically pulls btsnoop for live monitoring |
 
 All thread-to-UI communication uses Qt signals/slots.
 
@@ -465,7 +486,7 @@ Stored at `~/.adboss/config.json`, auto-created on first run:
 
 ## ADB Command Coverage
 
-ADBOSS wraps **54 ADB commands** across 13 categories:
+ADBOSS wraps **61 ADB commands** across 14 categories:
 
 | Category | Commands | Examples |
 |----------|----------|---------|
@@ -480,6 +501,7 @@ ADBOSS wraps **54 ADB commands** across 13 categories:
 | Backup | 1 | `adb backup` |
 | Developer | 2 | `setprop debug.layout`, `setprop debug.hwui.overdraw` |
 | Reboot | 1 | `adb reboot [bootloader\|recovery]` |
+| Bluetooth | 7 | `dumpsys bluetooth_manager`, `settings get/put secure bluetooth_hci_log`, `getprop/setprop persist.bluetooth.btsnoopenable`, `exec-out cat btsnoop_hci.log` |
 | Detection | 1 | `adb devices -l` |
 
 ---

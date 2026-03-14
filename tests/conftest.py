@@ -102,6 +102,27 @@ LOGCAT_LINE_ERROR = "01-15 12:34:57.123  1234  5678 E CrashTag: Something went w
 LOGCAT_LINE_INFO = "01-15 12:34:58.456  9012  3456 I SystemTag: System started"
 LOGCAT_LINE_MALFORMED = "This is not a valid logcat line"
 
+BLUETOOTH_MANAGER_OUTPUT = """\
+Bluetooth Status
+  enabled: true
+  state: ON
+  address: AA:BB:CC:DD:EE:FF
+  name: Pixel_6
+
+Bonded devices:
+  11:22:33:44:55:66 [JBL Flip 5]
+  77:88:99:AA:BB:CC [Galaxy Watch4]
+  DD:EE:FF:00:11:22 [AirPods Pro]
+
+Profile: A2dpService
+  11:22:33:44:55:66 state=Connected
+
+Profile: HeadsetService
+  11:22:33:44:55:66 state=Connected
+
+Profile: HidHostService
+"""
+
 
 @pytest.fixture
 def mock_adb():

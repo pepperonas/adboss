@@ -26,6 +26,7 @@ from ui.shell_tab import ShellTab
 from ui.logcat_tab import LogcatTab
 from ui.input_tab import InputTab
 from ui.settings_tab import SettingsTab
+from ui.bluetooth_tab import BluetoothTab
 from ui.widgets.device_selector import DeviceSelector
 from utils.config import config
 from version import __version__
@@ -89,6 +90,7 @@ class MainWindow(QMainWindow):
         self._logcat = LogcatTab()
         self._input = InputTab()
         self._settings = SettingsTab()
+        self._bluetooth = BluetoothTab()
 
         self._tabs.addTab(self._dashboard, "Dashboard")
         self._tabs.addTab(self._control, "Control")
@@ -98,6 +100,7 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._logcat, "Logcat")
         self._tabs.addTab(self._input, "Input")
         self._tabs.addTab(self._settings, "Settings")
+        self._tabs.addTab(self._bluetooth, "Bluetooth")
 
         main_layout.addWidget(self._tabs)
 
@@ -124,7 +127,7 @@ class MainWindow(QMainWindow):
         view_menu = menu_bar.addMenu("View")
         tab_names = [
             "Dashboard", "Control", "Apps", "Files",
-            "Shell", "Logcat", "Input", "Settings",
+            "Shell", "Logcat", "Input", "Settings", "Bluetooth",
         ]
         for i, name in enumerate(tab_names):
             action = QAction(f"{name}", self)
@@ -173,6 +176,8 @@ class MainWindow(QMainWindow):
             self._files.init_paths()
         elif current is self._settings:
             self._settings.refresh()
+        elif current is self._bluetooth:
+            self._bluetooth.refresh()
 
     def _shortcut_logcat_toggle(self) -> None:
         """Toggle logcat start/stop."""
@@ -193,6 +198,7 @@ class MainWindow(QMainWindow):
         self._logcat.status_message.connect(self._show_status)
         self._input.status_message.connect(self._show_status)
         self._settings.status_message.connect(self._show_status)
+        self._bluetooth.status_message.connect(self._show_status)
 
     def _on_tab_changed(self, index: int) -> None:
         """Auto-refresh apps when switching to the Apps tab."""
@@ -225,6 +231,7 @@ class MainWindow(QMainWindow):
         self._logcat.set_adb(self._adb)
         self._input.set_adb(self._adb)
         self._settings.set_adb(self._adb)
+        self._bluetooth.set_adb(self._adb)
 
         self._status_label.setText(f"Connected: {serial}")
         self._refresh_dashboard()
@@ -301,6 +308,7 @@ class MainWindow(QMainWindow):
 
         self._apps.cleanup()
         self._logcat.cleanup()
+        self._bluetooth.cleanup()
         self._adb.cleanup()
 
         event.accept()

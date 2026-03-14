@@ -38,7 +38,7 @@ pyinstaller --name "ADBOSS" --windowed --icon assets/icon.icns --add-data "asset
 ### Layered Design
 
 ```
-main.py → MainWindow → 8 Tabs (each with own QThread workers)
+main.py → MainWindow → 9 Tabs (each with own QThread workers)
                 ↓
            ADBClient (single shared instance, all ADB goes through here)
                 ↓
@@ -67,7 +67,7 @@ All thread-to-UI communication uses Qt signals/slots (thread-safe).
 
 `MainWindow` owns one `ADBClient` instance. On device switch:
 1. `ADBClient.device_serial` is updated
-2. All 8 tabs receive it via `tab.set_adb(self._adb)`
+2. All 9 tabs receive it via `tab.set_adb(self._adb)`
 3. Dashboard refresh cycle restarts
 
 `DeviceSelector` has its own separate `ADBClient` (no serial) for polling `adb devices -l`, plus a reference to the shared ADBClient via `set_shared_adb()` for WiFi ADB features (TCP/IP switching, IP auto-detection).
@@ -78,7 +78,9 @@ Singleton at `utils/config.py` → persists to `~/.adboss/config.json`. Smart AD
 
 ### Parsing
 
-All ADB output parsing lives in `utils/helpers.py` as pure functions. ADBClient methods call the parser and return dicts. This keeps parsing testable without devices.
+All ADB text output parsing lives in `utils/helpers.py` as pure functions. ADBClient methods call the parser and return dicts. This keeps parsing testable without devices.
+
+Binary protocol parsing (Bluetooth HCI/btsnoop) lives in `core/bluetooth_parser.py` as a separate module since it operates on `bytes` not `str`, uses `struct` for decoding, and has its own dataclasses (`HCIPacket`, `CaptureStats`). The Bluetooth tab pulls raw binary data via `adb exec-out cat` rather than the usual `adb shell` text pipeline.
 
 ### Tests
 
@@ -95,8 +97,8 @@ Tests live in `tests/` using pytest. `conftest.py` provides a `mock_adb` fixture
 ## Keyboard Shortcuts
 
 All defined in `MainWindow._build_menu()`:
-- `Ctrl+1`..`Ctrl+8` — Switch to tab (Dashboard, Control, Apps, Files, Shell, Logcat, Input, Settings)
-- `Ctrl+R` — Context-dependent refresh (Dashboard/Apps/Files/Settings)
+- `Ctrl+1`..`Ctrl+9` — Switch to tab (Dashboard, Control, Apps, Files, Shell, Logcat, Input, Settings, Bluetooth)
+- `Ctrl+R` — Context-dependent refresh (Dashboard/Apps/Files/Settings/Bluetooth)
 - `Ctrl+L` — Logcat Start/Stop toggle
 - `Ctrl+K` — Logcat Clear
 - `Ctrl+Shift+S` — Screenshot (Files tab)

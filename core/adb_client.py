@@ -10,6 +10,7 @@ from utils.config import config
 from utils.helpers import (
     format_bytes,
     parse_battery_output,
+    parse_bluetooth_manager,
     parse_cpu_output,
     parse_devices_output,
     parse_df_output,
@@ -471,6 +472,70 @@ class ADBClient:
             self._run(["reboot", mode], timeout=5)
         else:
             self._run(["reboot"], timeout=5)
+
+    # --- Bluetooth ---
+
+    def get_bluetooth_info(self) -> dict:
+        """Get Bluetooth adapter info and paired/connected devices."""
+        output = self._shell("dumpsys bluetooth_manager", timeout=15)
+        return parse_bluetooth_manager(output)
+
+    def is_bt_snoop_enabled(self) -> bool:
+        """Check if HCI snoop logging is enabled."""
+        result = self._shell("settings get secure bluetooth_hci_log").strip()
+        if result == "1":
+            return True
+        prop = self._shell("getprop persist.bluetooth.btsnoopenable").strip()
+        return prop.lower() == "true"
+
+    def enable_bt_snoop(self) -> bool:
+        """Enable HCI snoop logging. Returns True on success."""
+        self._shell("settings put secure bluetooth_hci_log 1")
+        self._shell("setprop persist.bluetooth.btsnoopenable true")
+        self._shell("setprop persist.bluetooth.btsnooplogmode full")
+        return self.is_bt_snoop_enabled()
+
+    def disable_bt_snoop(self) -> None:
+        """Disable HCI snoop logging."""
+        self._shell("settings put secure bluetooth_hci_log 0")
+        self._shell("setprop persist.bluetooth.btsnoopenable false")
+
+    def pull_bt_snoop_log(self, local_path: str) -> str:
+        """Pull the btsnoop_hci.log from device. Tries multiple locations."""
+        paths = [
+            "/data/misc/bluetooth/logs/btsnoop_hci.log",
+            "/data/log/bt/btsnoop_hci.log",
+            "/sdcard/btsnoop_hci.log",
+            "/data/misc/bluedroid/btsnoop_hci.log",
+        ]
+        for remote in paths:
+            result = self._run(["pull", remote, local_path], timeout=60)
+            if "error" not in result.lower() and "does not exist" not in result.lower():
+                return result.strip()
+        # Try bugreport-based extraction as last resort
+        return ""
+
+    def get_bt_snoop_log_data(self) -> bytes:
+        """Pull btsnoop log and return raw bytes."""
+        paths = [
+            "/data/misc/bluetooth/logs/btsnoop_hci.log",
+            "/data/log/bt/btsnoop_hci.log",
+            "/sdcard/btsnoop_hci.log",
+            "/data/misc/bluedroid/btsnoop_hci.log",
+        ]
+        for remote in paths:
+            cmd = self._base_cmd() + ["exec-out", "cat", remote]
+            try:
+                result = subprocess.run(cmd, capture_output=True, timeout=30)
+                if result.returncode == 0 and result.stdout and result.stdout[:8] == b"btsnoop\x00":
+                    return result.stdout
+            except (subprocess.TimeoutExpired, OSError):
+                continue
+        return b""
+
+    def get_ble_scan_results(self) -> str:
+        """Get BLE scan results from dumpsys."""
+        return self._shell("dumpsys bluetooth_manager --proto", timeout=15)
 
     def cleanup(self) -> None:
         """Clean up resources on shutdown."""

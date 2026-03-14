@@ -223,6 +223,80 @@ def parse_permissions(output: str) -> list[dict]:
     return permissions
 
 
+def parse_bluetooth_manager(output: str) -> dict:
+    """Parse `dumpsys bluetooth_manager` output for adapter info and devices."""
+    info: dict = {
+        "enabled": False,
+        "address": "",
+        "name": "",
+        "paired_devices": [],
+        "connected_devices": [],
+        "profiles": [],
+    }
+    if not output:
+        return info
+
+    lines = output.splitlines()
+
+    # Check enabled state
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("enabled:"):
+            info["enabled"] = "true" in stripped.lower()
+        elif stripped.startswith("address:") or stripped.startswith("Address:"):
+            addr = stripped.split(":", 1)[1].strip()
+            if len(addr) >= 17:
+                info["address"] = addr[:17]
+        elif stripped.startswith("name:") or stripped.startswith("Name:"):
+            info["name"] = stripped.split(":", 1)[1].strip()
+
+    # Parse bonded/paired devices
+    in_bonded = False
+    for line in lines:
+        stripped = line.strip()
+        if "Bonded devices:" in stripped or "bonded devices:" in stripped.lower():
+            in_bonded = True
+            continue
+        if in_bonded:
+            if not stripped or (not stripped[0].isalnum() and stripped[0] not in "(["):
+                if not stripped.startswith(" "):
+                    in_bonded = False
+                    continue
+            # Lines like: "AA:BB:CC:DD:EE:FF [Name]" or just addresses
+            m = re.match(
+                r"([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})\s*(.*)",
+                stripped,
+            )
+            if m:
+                addr = m.group(1).upper()
+                name = m.group(2).strip().strip("[]")
+                info["paired_devices"].append({
+                    "address": addr,
+                    "name": name or "Unknown",
+                })
+
+    # Parse connected devices from profile sections
+    connected_addrs: set[str] = set()
+    for line in lines:
+        stripped = line.strip()
+        if "state=" in stripped.lower() and "connected" in stripped.lower():
+            m = re.search(r"([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})", stripped)
+            if m:
+                connected_addrs.add(m.group(1).upper())
+
+    info["connected_devices"] = sorted(connected_addrs)
+
+    # Parse active profiles
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("Profile:"):
+            profile = stripped.split(":", 1)[1].strip()
+            if profile and profile not in info["profiles"]:
+                info["profiles"].append(profile)
+
+    return info
+
+
 def format_bytes(kb: int) -> str:
     """Format kilobytes into a human-readable string."""
     if kb < 1024:
