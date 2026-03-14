@@ -488,11 +488,19 @@ class ADBClient:
         prop = self._shell("getprop persist.bluetooth.btsnoopenable").strip()
         return prop.lower() == "true"
 
-    def enable_bt_snoop(self) -> bool:
-        """Enable HCI snoop logging. Returns True on success."""
+    def enable_bt_snoop(self, restart_bt: bool = True) -> bool:
+        """Enable HCI snoop logging and optionally restart Bluetooth.
+
+        Bluetooth must be restarted after enabling for the log to start.
+        """
         self._shell("settings put secure bluetooth_hci_log 1")
         self._shell("setprop persist.bluetooth.btsnoopenable true")
         self._shell("setprop persist.bluetooth.btsnooplogmode full")
+        if restart_bt:
+            self._shell("svc bluetooth disable")
+            import time
+            time.sleep(1)
+            self._shell("svc bluetooth enable")
         return self.is_bt_snoop_enabled()
 
     def disable_bt_snoop(self) -> None:
@@ -500,38 +508,109 @@ class ADBClient:
         self._shell("settings put secure bluetooth_hci_log 0")
         self._shell("setprop persist.bluetooth.btsnoopenable false")
 
+    # Known btsnoop log paths across Android versions
+    _BT_SNOOP_PATHS = [
+        "/data/misc/bluetooth/logs/btsnoop_hci.log",
+        "/data/log/bt/btsnoop_hci.log",
+        "/sdcard/btsnoop_hci.log",
+        "/data/misc/bluedroid/btsnoop_hci.log",
+    ]
+
     def pull_bt_snoop_log(self, local_path: str) -> str:
         """Pull the btsnoop_hci.log from device. Tries multiple locations."""
-        paths = [
-            "/data/misc/bluetooth/logs/btsnoop_hci.log",
-            "/data/log/bt/btsnoop_hci.log",
-            "/sdcard/btsnoop_hci.log",
-            "/data/misc/bluedroid/btsnoop_hci.log",
-        ]
-        for remote in paths:
+        for remote in self._BT_SNOOP_PATHS:
             result = self._run(["pull", remote, local_path], timeout=60)
             if "error" not in result.lower() and "does not exist" not in result.lower():
                 return result.strip()
-        # Try bugreport-based extraction as last resort
         return ""
 
-    def get_bt_snoop_log_data(self) -> bytes:
-        """Pull btsnoop log and return raw bytes."""
-        paths = [
-            "/data/misc/bluetooth/logs/btsnoop_hci.log",
-            "/data/log/bt/btsnoop_hci.log",
-            "/sdcard/btsnoop_hci.log",
-            "/data/misc/bluedroid/btsnoop_hci.log",
-        ]
-        for remote in paths:
+    def get_bt_snoop_log_data(self) -> tuple[bytes, str]:
+        """Pull btsnoop log with fallback chain. Returns (data, method_used).
+
+        Fallback order:
+        1. exec-out cat (fast, works ~60-70% of devices)
+        2. Copy to /data/local/tmp/ then pull (works ~85%)
+        3. Bugreport extraction (slow but works ~95%)
+        """
+        # Method 1: Direct exec-out cat
+        for remote in self._BT_SNOOP_PATHS:
             cmd = self._base_cmd() + ["exec-out", "cat", remote]
+            logger.debug("BT snoop: trying exec-out %s", remote)
             try:
                 result = subprocess.run(cmd, capture_output=True, timeout=30)
-                if result.returncode == 0 and result.stdout and result.stdout[:8] == b"btsnoop\x00":
-                    return result.stdout
+                if result.returncode == 0 and result.stdout[:8] == b"btsnoop\x00":
+                    logger.info("BT snoop: success via exec-out %s", remote)
+                    return result.stdout, "exec-out"
             except (subprocess.TimeoutExpired, OSError):
                 continue
+
+        # Method 2: Copy to world-readable tmp, then pull
+        tmp_remote = "/data/local/tmp/_adboss_btsnoop.log"
+        for remote in self._BT_SNOOP_PATHS:
+            logger.debug("BT snoop: trying copy %s -> %s", remote, tmp_remote)
+            cp_out = self._shell(f"cp {remote} {tmp_remote} 2>/dev/null && echo OK")
+            if "OK" in cp_out:
+                cmd = self._base_cmd() + ["exec-out", "cat", tmp_remote]
+                try:
+                    result = subprocess.run(cmd, capture_output=True, timeout=30)
+                    self._shell(f"rm -f {tmp_remote}")
+                    if result.returncode == 0 and result.stdout[:8] == b"btsnoop\x00":
+                        logger.info("BT snoop: success via copy %s", remote)
+                        return result.stdout, "copy"
+                except (subprocess.TimeoutExpired, OSError):
+                    self._shell(f"rm -f {tmp_remote}")
+
+        # Method 3: Extract from bugreport (slow but most reliable)
+        logger.debug("BT snoop: trying bugreport extraction")
+        data = self._extract_bt_snoop_from_bugreport()
+        if data:
+            logger.info("BT snoop: success via bugreport")
+            return data, "bugreport"
+
+        return b"", ""
+
+    def _extract_bt_snoop_from_bugreport(self) -> bytes:
+        """Extract btsnoop log from adb bugreport zip."""
+        import glob
+        import tempfile
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bugreport_base = f"{tmpdir}/bugreport"
+            cmd = self._base_cmd() + ["bugreport", bugreport_base]
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=120)
+            except (subprocess.TimeoutExpired, OSError) as e:
+                logger.warning("Bugreport failed: %s", e)
+                return b""
+
+            zips = glob.glob(f"{tmpdir}/bugreport*.zip")
+            if not zips:
+                return b""
+
+            try:
+                with zipfile.ZipFile(zips[0], "r") as zf:
+                    # Search for btsnoop in the archive
+                    for name in zf.namelist():
+                        if "btsnoop_hci" in name.lower():
+                            data = zf.read(name)
+                            if data[:8] == b"btsnoop\x00":
+                                return data
+            except (zipfile.BadZipFile, KeyError, OSError) as e:
+                logger.warning("Bugreport extraction failed: %s", e)
+
         return b""
+
+    def enable_btsnoop_net(self) -> bool:
+        """Enable btsnoop_net and forward port 8872 for live streaming."""
+        self._shell("setprop persist.bluetooth.btsnoop_net true")
+        result = self._run(["forward", "tcp:8872", "tcp:8872"], timeout=5)
+        return "error" not in result.lower()
+
+    def disable_btsnoop_net(self) -> None:
+        """Disable btsnoop_net and remove port forward."""
+        self._shell("setprop persist.bluetooth.btsnoop_net false")
+        self._run(["forward", "--remove", "tcp:8872"], timeout=5)
 
     def get_ble_scan_results(self) -> str:
         """Get BLE scan results from dumpsys."""

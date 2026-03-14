@@ -78,7 +78,7 @@ class BluetoothInfoWorker(QThread):
 
 
 class BtSnoopCaptureWorker(QThread):
-    """Pull and parse btsnoop log from device."""
+    """Pull and parse btsnoop log from device with fallback chain."""
 
     capture_ready = Signal(list)  # list[HCIPacket]
     progress = Signal(str)
@@ -91,24 +91,30 @@ class BtSnoopCaptureWorker(QThread):
 
     def run(self) -> None:
         self._running = True
-        self.progress.emit("Pulling btsnoop_hci.log from device...")
+        self.progress.emit("Pulling btsnoop_hci.log (trying multiple methods)...")
         try:
-            data = self._adb.get_bt_snoop_log_data()
+            data, method = self._adb.get_bt_snoop_log_data()
             if not data:
                 self.error_occurred.emit(
-                    "No btsnoop log found. Enable HCI snoop logging in "
-                    "Developer Options or use the Enable button, then "
-                    "toggle Bluetooth off/on."
+                    "No btsnoop log found. Tried: direct read, copy, "
+                    "and bugreport extraction.\n"
+                    "1. Enable 'Bluetooth HCI snoop log' in Developer Options\n"
+                    "2. Use the 'Enable HCI Log' button (restarts Bluetooth)\n"
+                    "3. Generate some BT traffic, then try again"
                 )
                 return
-            self.progress.emit(f"Parsing {len(data)} bytes...")
+            self.progress.emit(
+                f"Parsing {len(data):,} bytes (via {method})..."
+            )
             packets = parse_btsnoop(data)
             if not packets:
                 self.error_occurred.emit(
                     "btsnoop log found but contained no valid packets."
                 )
                 return
-            self.progress.emit(f"Decoded {len(packets)} packets")
+            self.progress.emit(
+                f"Decoded {len(packets)} packets (via {method})"
+            )
             self.capture_ready.emit(packets)
         except Exception as e:
             if self._running:
@@ -121,7 +127,7 @@ class BtSnoopCaptureWorker(QThread):
 
 
 class LiveCaptureWorker(QThread):
-    """Periodically pull btsnoop log for live-ish monitoring."""
+    """Live BT capture — tries btsnoop_net socket first, falls back to polling."""
 
     new_packets = Signal(list)  # list[HCIPacket]
     progress = Signal(str)
@@ -133,13 +139,21 @@ class LiveCaptureWorker(QThread):
         self._interval = interval_ms / 1000.0
         self._running = False
         self._last_count = 0
+        self._sock = None
 
     def run(self) -> None:
         self._running = True
         self._last_count = 0
+
+        # Try btsnoop_net socket first (real-time)
+        if self._try_btsnoop_net():
+            return  # btsnoop_net handled the loop
+
+        # Fall back to polling
+        self.progress.emit("Live: using file polling (2s interval)")
         while self._running:
             try:
-                data = self._adb.get_bt_snoop_log_data()
+                data, _method = self._adb.get_bt_snoop_log_data()
                 if data:
                     packets = parse_btsnoop(data)
                     if len(packets) > self._last_count:
@@ -158,8 +172,161 @@ class LiveCaptureWorker(QThread):
             while self._running and time.monotonic() < end:
                 time.sleep(0.1)
 
+    def _try_btsnoop_net(self) -> bool:
+        """Try real-time capture via btsnoop_net socket (port 8872).
+
+        Returns True if it ran the main loop (success or graceful end).
+        Returns False if btsnoop_net is not available.
+        """
+        import socket
+        import struct
+
+        try:
+            if not self._adb.enable_btsnoop_net():
+                return False
+
+            self.progress.emit("Live: connecting via btsnoop_net (port 8872)...")
+            time.sleep(0.5)
+
+            self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._sock.settimeout(3.0)
+            self._sock.connect(("127.0.0.1", 8872))
+            self._sock.settimeout(1.0)
+
+            self.progress.emit("Live: streaming via btsnoop_net (real-time)")
+
+            buf = b""
+            pkt_index = 0
+            first_ts = 0
+            # Read btsnoop header (16 bytes)
+            while self._running and len(buf) < 16:
+                try:
+                    chunk = self._sock.recv(4096)
+                    if not chunk:
+                        return True
+                    buf += chunk
+                except socket.timeout:
+                    continue
+
+            if len(buf) < 16 or buf[:8] != b"btsnoop\x00":
+                self.progress.emit("Live: btsnoop_net header invalid, falling back to polling")
+                self._close_sock()
+                return False
+
+            _version = struct.unpack_from(">I", buf, 8)[0]
+            datalink = struct.unpack_from(">I", buf, 12)[0]
+            is_h4 = (datalink == 1002)
+            buf = buf[16:]
+
+            batch: list[HCIPacket] = []
+            last_emit = time.monotonic()
+
+            while self._running:
+                # Try to read more data
+                try:
+                    chunk = self._sock.recv(8192)
+                    if not chunk:
+                        break
+                    buf += chunk
+                except socket.timeout:
+                    pass
+
+                # Parse complete records from buffer
+                while len(buf) >= 24:
+                    orig_len = struct.unpack_from(">I", buf, 0)[0]
+                    incl_len = struct.unpack_from(">I", buf, 4)[0]
+                    if len(buf) < 24 + incl_len:
+                        break  # Need more data
+
+                    flags = struct.unpack_from(">I", buf, 8)[0]
+                    ts_us = struct.unpack_from(">Q", buf, 16)[0]
+                    record_data = buf[24:24 + incl_len]
+                    buf = buf[24 + incl_len:]
+
+                    # Decode direction and type (same logic as parse_btsnoop)
+                    direction = HCIDirection.RECEIVED if (flags & 0x01) else HCIDirection.SENT
+                    is_cmd_evt = bool(flags & 0x02)
+
+                    if is_h4 and record_data:
+                        pkt_type_byte = record_data[0]
+                        pkt_data = record_data[1:]
+                        try:
+                            pkt_type = HCIPacketType(pkt_type_byte)
+                        except ValueError:
+                            continue
+                    else:
+                        if direction == HCIDirection.SENT:
+                            pkt_type = HCIPacketType.COMMAND if is_cmd_evt else HCIPacketType.ACL_DATA
+                        else:
+                            pkt_type = HCIPacketType.EVENT if is_cmd_evt else HCIPacketType.ACL_DATA
+                        pkt_data = record_data
+
+                    from core.bluetooth_parser import (
+                        _BTSNOOP_EPOCH_DELTA,
+                        decode_hci_command,
+                        decode_hci_event,
+                        decode_acl_data,
+                        decode_sco_data,
+                    )
+
+                    unix_us = ts_us - _BTSNOOP_EPOCH_DELTA
+                    if pkt_index == 0:
+                        first_ts = unix_us
+
+                    pkt = HCIPacket(
+                        index=pkt_index,
+                        timestamp_us=unix_us - first_ts,
+                        direction=direction,
+                        packet_type=pkt_type,
+                        raw_data=pkt_data,
+                    )
+                    pkt_index += 1
+
+                    if pkt_type == HCIPacketType.COMMAND:
+                        decode_hci_command(pkt)
+                    elif pkt_type == HCIPacketType.EVENT:
+                        decode_hci_event(pkt)
+                    elif pkt_type == HCIPacketType.ACL_DATA:
+                        decode_acl_data(pkt)
+                    elif pkt_type == HCIPacketType.SCO_DATA:
+                        decode_sco_data(pkt)
+
+                    batch.append(pkt)
+
+                # Emit batch periodically
+                now = time.monotonic()
+                if batch and (len(batch) >= 50 or now - last_emit >= 0.5):
+                    self.new_packets.emit(batch)
+                    self.progress.emit(
+                        f"Live (btsnoop_net): {pkt_index} packets (+{len(batch)} new)"
+                    )
+                    batch = []
+                    last_emit = now
+
+            # Emit remaining
+            if batch and self._running:
+                self.new_packets.emit(batch)
+
+            self._close_sock()
+            return True
+
+        except (OSError, ConnectionRefusedError) as e:
+            logger.debug("btsnoop_net not available: %s", e)
+            self._close_sock()
+            return False
+
+    def _close_sock(self) -> None:
+        if self._sock:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+
     def stop(self) -> None:
         self._running = False
+        self._close_sock()
+        self._adb.disable_btsnoop_net()
         self.quit()
         self.wait(5000)
 
@@ -478,17 +645,19 @@ class BluetoothTab(QWidget):
     def _enable_snoop(self) -> None:
         if not self._adb:
             return
-        self.status_message.emit("Enabling HCI snoop logging...")
-        success = self._adb.enable_bt_snoop()
+        self.status_message.emit(
+            "Enabling HCI snoop logging + restarting Bluetooth..."
+        )
+        success = self._adb.enable_bt_snoop(restart_bt=True)
         if success:
             self.status_message.emit(
-                "HCI snoop logging enabled. Toggle Bluetooth off/on "
-                "to start capturing."
+                "HCI snoop logging enabled. Bluetooth restarted. "
+                "Generate BT traffic, then pull capture."
             )
         else:
             self.status_message.emit(
-                "Could not confirm HCI snoop enabled. May need root "
-                "or Developer Options on some devices."
+                "Could not confirm HCI snoop enabled. Try enabling "
+                "'Bluetooth HCI snoop log' in Developer Options manually."
             )
         self._check_snoop_status()
 
@@ -551,6 +720,8 @@ class BluetoothTab(QWidget):
         if self._live_worker:
             self._live_worker.stop()
             self._live_worker = None
+        if self._adb:
+            self._adb.disable_btsnoop_net()
         self._live_btn.setText("Live Capture")
         self._live_btn.setChecked(False)
         self.status_message.emit("Live capture stopped")
