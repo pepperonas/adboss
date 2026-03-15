@@ -57,8 +57,8 @@ Every ADB command flows through `core/adb_client.py`. Never call `subprocess` fo
 
 The GUI thread must never block. Three threading patterns are used:
 
-1. **One-shot QThread** (DeviceMonitor, PackageLoader, ShellWorker, SettingsLoaderThread) — created per operation, collects data, emits signals, finishes
-2. **Long-running QThread** (LogcatReader, FileTransferWorker) — streams data continuously via signals until stopped
+1. **One-shot QThread** (DeviceMonitor, PackageLoader, ShellWorker, SettingsLoaderThread, BluetoothInfoWorker, BtSnoopCaptureWorker) — created per operation, collects data, emits signals, finishes
+2. **Long-running QThread** (LogcatReader, FileTransferWorker, LiveCaptureWorker) — streams data continuously via signals until stopped
 3. **QTimer polling** — DeviceSelector polls `adb devices` every 3s, dashboard refreshes every 5s
 
 All thread-to-UI communication uses Qt signals/slots (thread-safe).
@@ -82,6 +82,18 @@ All ADB text output parsing lives in `utils/helpers.py` as pure functions. ADBCl
 
 Binary protocol parsing (Bluetooth HCI/btsnoop) lives in `core/bluetooth_parser.py` as a separate module since it operates on `bytes` not `str`, uses `struct` for decoding, and has its own dataclasses (`HCIPacket`, `CaptureStats`). The Bluetooth tab pulls raw binary data via `adb exec-out cat` rather than the usual `adb shell` text pipeline.
 
+## Bluetooth Capture Architecture
+
+`get_bt_snoop_log_data()` uses a three-tier fallback chain because the btsnoop log path (`/data/misc/bluetooth/logs/`) is not readable without root on many devices:
+
+1. **exec-out cat** — fastest, works on ~60-70% of devices
+2. **Copy to `/data/local/tmp/`** — world-writable dir bypasses SELinux, works ~85%
+3. **Bugreport ZIP extraction** — `adb bugreport` runs with system privileges, works ~95% but slow (3-10s)
+
+Live capture tries **btsnoop_net** first (TCP socket on port 8872 via `adb forward`, real-time streaming) then falls back to file polling every 2s. `enable_bt_snoop()` auto-restarts Bluetooth so the log starts writing immediately.
+
+Do NOT collapse this fallback chain into a single method — each tier handles a different device security profile.
+
 ### Tests
 
 Tests live in `tests/` using pytest. `conftest.py` provides a `mock_adb` fixture that patches subprocess and config. All tests are pure — no real ADB device needed. CI runs on Python 3.11/3.12/3.13 via `.github/workflows/tests.yml`.
@@ -90,7 +102,7 @@ Tests live in `tests/` using pytest. `conftest.py` provides a `mock_adb` fixture
 
 1. New ADB command → add method to `ADBClient`, add parser to `helpers.py` if needed
 2. New UI control → add to the appropriate tab, use `self._run(label, self._adb.method, args)` pattern for error handling + status bar feedback
-3. New tab → create `ui/new_tab.py` with `status_message = Signal(str)` and `set_adb()`, register in `main_window.py` (_build_ui, _connect_signals, _on_device_changed), add keyboard shortcut in `_build_menu`
+3. New tab → create `ui/new_tab.py` with `status_message = Signal(str)` and `set_adb()`, register in `main_window.py` (_build_ui, _connect_signals, _on_device_changed), add keyboard shortcut in `_build_menu`. If the tab uses workers, add a `cleanup()` method and call it from `MainWindow.closeEvent`
 4. New config key → add default to `DEFAULT_CONFIG` in `utils/config.py`
 5. Long-running operation → must use QThread with signal emission, never block GUI thread
 
