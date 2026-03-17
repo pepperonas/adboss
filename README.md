@@ -113,7 +113,8 @@ Real-time device overview with auto-refresh (configurable, default 5s):
 
 ### Bluetooth Analyzer
 - **HCI Snoop Capture** — Pull and parse Android's `btsnoop_hci.log` for full Bluetooth traffic analysis
-- **Live Capture Mode** — Continuously poll the device for new HCI packets (2s interval) with real-time table updates
+- **Samsung/Strict-SELinux Support** — Three-tier fallback: direct read → copy to tmp → bugreport extraction (~1-4 min). Works on devices where all direct access is blocked
+- **Live Capture Mode** — Real-time via btsnoop_net socket (sub-ms latency), or file polling (2s), or bugreport polling for locked devices. Auto-detects fastest available method
 - **Full HCI Stack Decoding** — Commands (60+ opcodes), Events (30+ codes), ACL Data, SCO Data
 - **Protocol Dissection** — L2CAP channel routing, ATT/GATT attribute operations, SMP pairing sequences
 - **BLE Advertising Reports** — Decode advertising data structures: device name, flags, TX power, service UUIDs, manufacturer-specific data
@@ -125,7 +126,8 @@ Real-time device overview with auto-refresh (configurable, default 5s):
 - **Capture Statistics** — Packet counts by type, protocol breakdown, duration, bytes transferred, unique devices seen
 - **Export Formats** — Save captures as `.pcap` (Wireshark-compatible), `.btsnoop`, or decoded `.txt`
 - **Load Offline** — Import previously saved `.btsnoop` / `.log` files for analysis without a device
-- **HCI Snoop Control** — Enable/disable HCI logging directly from the app (sets `bluetooth_hci_log` + system properties)
+- **HCI Snoop Control** — Enable/disable HCI logging directly from the app with automatic Bluetooth restart
+- **Progress Feedback** — Real-time status updates during capture showing which method is being tried and extraction progress
 
 ### WiFi ADB
 - **WiFi Connect Button** — Directly in the device selector header bar
