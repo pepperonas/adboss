@@ -788,18 +788,24 @@ class BluetoothTab(QWidget):
         if self._capture_worker and self._capture_worker.isRunning():
             return
         self._progress_bar.setVisible(True)
-        self._progress_bar.setRange(0, 100)
-        self._progress_bar.setValue(0)
+        self._progress_bar.setRange(0, 0)  # Indeterminate/marquee mode
         self._capture_btn.setEnabled(False)
         self._capture_worker = BtSnoopCaptureWorker(self._adb, self)
         self._capture_worker.capture_ready.connect(self._on_capture_ready)
-        self._capture_worker.progress.connect(
-            lambda msg: self.status_message.emit(msg)
-        )
-        self._capture_worker.progress_pct.connect(self._progress_bar.setValue)
+        self._capture_worker.progress.connect(self._on_capture_progress)
+        self._capture_worker.progress_pct.connect(self._on_capture_pct)
         self._capture_worker.error_occurred.connect(self._on_capture_error)
         self._capture_worker.finished.connect(self._on_capture_finished)
         self._capture_worker.start()
+
+    def _on_capture_progress(self, msg: str) -> None:
+        self.status_message.emit(msg)
+
+    def _on_capture_pct(self, pct: int) -> None:
+        if pct > 0:
+            # Switch from indeterminate to determinate mode
+            self._progress_bar.setRange(0, 100)
+            self._progress_bar.setValue(pct)
 
     def _on_capture_error(self, msg: str) -> None:
         self.status_message.emit(msg)
@@ -811,16 +817,17 @@ class BluetoothTab(QWidget):
         self._capture_btn.setEnabled(True)
 
     def _on_capture_ready(self, packets: list[HCIPacket]) -> None:
+        self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(95)
         self.status_message.emit(
-            f"Loading {len(packets):,} packets into table..."
+            f"Loading {len(packets):,} packets..."
         )
         self._packets = packets
         self._apply_filters()
         stats = compute_stats(packets)
         self._update_stats(stats)
         self._progress_bar.setValue(100)
-        QTimer.singleShot(500, lambda: self._progress_bar.setVisible(False))
+        QTimer.singleShot(800, lambda: self._progress_bar.setVisible(False))
         self.status_message.emit(f"Captured {len(packets):,} HCI packets")
 
     # --- Live capture ---
