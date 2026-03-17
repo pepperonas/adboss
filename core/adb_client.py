@@ -608,9 +608,29 @@ class ADBClient:
             cmd = self._base_cmd() + ["bugreport", bugreport_base]
             _progress("Generating bugreport (this takes ~1-4 min)...")
             try:
-                subprocess.run(cmd, capture_output=True, timeout=300)
+                # Use Popen to read progress from stderr in real-time
+                proc = subprocess.Popen(
+                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
+                )
+                import re
+                while proc.poll() is None:
+                    line = proc.stderr.readline()
+                    if not line:
+                        continue
+                    # adb bugreport outputs progress like "X/Y" or "X%"
+                    m = re.search(r"(\d+)/(\d+)", line)
+                    if m:
+                        cur, total = int(m.group(1)), int(m.group(2))
+                        pct = int(cur / total * 100) if total else 0
+                        _progress(f"Bugreport: {pct}% ({cur}/{total})")
+                    else:
+                        m = re.search(r"(\d+)%", line)
+                        if m:
+                            _progress(f"Bugreport: {m.group(1)}%")
+                if proc.returncode and proc.returncode != 0:
+                    logger.warning("Bugreport exited with code %d", proc.returncode)
             except subprocess.TimeoutExpired:
-                logger.warning("Bugreport timed out (300s)")
+                logger.warning("Bugreport timed out")
                 _progress("Bugreport timed out")
                 return b""
             except OSError as e:

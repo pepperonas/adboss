@@ -5,7 +5,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QThread, QTimer
+from PySide6.QtCore import Qt, Signal, QThread, QTimer, QAbstractTableModel, QModelIndex
 from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (
     QWidget,
@@ -15,8 +15,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QLabel,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
+    QTableView,
     QTreeWidget,
     QTreeWidgetItem,
     QPlainTextEdit,
@@ -25,6 +24,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QFileDialog,
     QAbstractItemView,
+    QProgressBar,
 )
 
 from core.adb_client import ADBClient
@@ -82,6 +82,7 @@ class BtSnoopCaptureWorker(QThread):
 
     capture_ready = Signal(list)  # list[HCIPacket]
     progress = Signal(str)
+    progress_pct = Signal(int)  # 0-100 for progress bar
     error_occurred = Signal(str)
 
     def __init__(self, adb: ADBClient, parent=None) -> None:
@@ -89,14 +90,25 @@ class BtSnoopCaptureWorker(QThread):
         self._adb = adb
         self._running = False
 
+    def _progress_cb(self, msg: str) -> None:
+        """Handle progress from ADBClient, extract percentage if present."""
+        self.progress.emit(msg)
+        # Parse "Bugreport: 42% ..." or "Bugreport: 42/100"
+        import re
+        m = re.search(r"Bugreport:\s*(\d+)%", msg)
+        if m:
+            self.progress_pct.emit(int(m.group(1)))
+
     def run(self) -> None:
         self._running = True
-        self.progress.emit("Pulling btsnoop_hci.log (trying multiple methods)...")
+        self.progress_pct.emit(0)
+        self.progress.emit("Pulling btsnoop_hci.log...")
         try:
             data, method = self._adb.get_bt_snoop_log_data(
-                progress_cb=lambda msg: self.progress.emit(msg)
+                progress_cb=self._progress_cb
             )
             if not data:
+                self.progress_pct.emit(0)
                 self.error_occurred.emit(
                     "No btsnoop log found. All methods failed.\n"
                     "1. Enable 'Bluetooth HCI snoop log' in Developer Options\n"
@@ -104,21 +116,25 @@ class BtSnoopCaptureWorker(QThread):
                     "3. Generate BT traffic (connect a device), then try again"
                 )
                 return
+            self.progress_pct.emit(90)
             self.progress.emit(
                 f"Parsing {len(data):,} bytes (via {method})..."
             )
             packets = parse_btsnoop(data)
             if not packets:
+                self.progress_pct.emit(0)
                 self.error_occurred.emit(
                     "btsnoop log found but contained no valid packets."
                 )
                 return
+            self.progress_pct.emit(100)
             self.progress.emit(
                 f"Decoded {len(packets):,} packets (via {method})"
             )
             self.capture_ready.emit(packets)
         except Exception as e:
             if self._running:
+                self.progress_pct.emit(0)
                 self.error_occurred.emit(f"Capture error: {e}")
 
     def stop(self) -> None:
@@ -354,6 +370,76 @@ class LiveCaptureWorker(QThread):
         self.wait(5000)
 
 
+_TABLE_HEADERS = ["#", "Time", "Type", "Dir", "Protocol", "Summary", "Size"]
+_RIGHT_ALIGN = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+_CENTER_ALIGN = Qt.AlignmentFlag.AlignCenter
+
+
+class PacketTableModel(QAbstractTableModel):
+    """Virtual table model — only renders visible rows, handles 100k+ packets."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._packets: list[HCIPacket] = []
+
+    def set_packets(self, packets: list[HCIPacket]) -> None:
+        self.beginResetModel()
+        self._packets = packets
+        self.endResetModel()
+
+    def rowCount(self, parent=QModelIndex()) -> int:
+        return len(self._packets)
+
+    def columnCount(self, parent=QModelIndex()) -> int:
+        return 7
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
+            return _TABLE_HEADERS[section]
+        return None
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid() or index.row() >= len(self._packets):
+            return None
+        pkt = self._packets[index.row()]
+        col = index.column()
+
+        if role == Qt.ItemDataRole.DisplayRole:
+            if col == 0:
+                return str(pkt.index)
+            elif col == 1:
+                return f"{pkt.relative_time:.6f}"
+            elif col == 2:
+                return pkt.type_name
+            elif col == 3:
+                return pkt.direction_str
+            elif col == 4:
+                return pkt.protocol
+            elif col == 5:
+                return pkt.summary
+            elif col == 6:
+                return str(len(pkt.raw_data))
+
+        elif role == Qt.ItemDataRole.ForegroundRole:
+            if col in (2, 5):
+                return PKT_TYPE_COLORS.get(pkt.type_name, QColor("#d4d4d4"))
+            elif col == 4:
+                return PROTOCOL_COLORS.get(pkt.protocol, QColor("#d4d4d4"))
+
+        elif role == Qt.ItemDataRole.TextAlignmentRole:
+            if col in (0, 1, 6):
+                return _RIGHT_ALIGN
+            elif col in (2, 3):
+                return _CENTER_ALIGN
+
+        return None
+
+    def packet_at(self, row: int) -> HCIPacket | None:
+        if 0 <= row < len(self._packets):
+            return self._packets[row]
+        return None
+
+
 class BluetoothTab(QWidget):
     """Bluetooth HCI snoop capture and analysis tab."""
 
@@ -416,6 +502,15 @@ class BluetoothTab(QWidget):
         toolbar.addWidget(self._snoop_status)
 
         layout.addLayout(toolbar)
+
+        # --- Progress bar ---
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setMaximumHeight(18)
+        self._progress_bar.setTextVisible(True)
+        self._progress_bar.setFormat("%v%  %p")
+        self._progress_bar.setValue(0)
+        self._progress_bar.setVisible(False)
+        layout.addWidget(self._progress_bar)
 
         # --- Filter bar ---
         filter_row = QHBoxLayout()
@@ -519,12 +614,10 @@ class BluetoothTab(QWidget):
         # Right panel: Packet table + Detail
         right_splitter = QSplitter(Qt.Orientation.Vertical)
 
-        # Packet table
-        self._packet_table = QTableWidget()
-        self._packet_table.setColumnCount(7)
-        self._packet_table.setHorizontalHeaderLabels([
-            "#", "Time", "Type", "Dir", "Protocol", "Summary", "Size",
-        ])
+        # Packet table (virtual model — instant for 100k+ packets)
+        self._packet_model = PacketTableModel(self)
+        self._packet_table = QTableView()
+        self._packet_table.setModel(self._packet_model)
         self._packet_table.setAlternatingRowColors(True)
         self._packet_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
@@ -548,7 +641,9 @@ class BluetoothTab(QWidget):
         hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         hdr.resizeSection(6, 50)   # Size
 
-        self._packet_table.currentCellChanged.connect(self._on_packet_selected)
+        self._packet_table.selectionModel().currentRowChanged.connect(
+            self._on_row_changed
+        )
         right_splitter.addWidget(self._packet_table)
 
         # Detail panel (tabbed: detail + hex)
@@ -692,25 +787,41 @@ class BluetoothTab(QWidget):
             return
         if self._capture_worker and self._capture_worker.isRunning():
             return
+        self._progress_bar.setVisible(True)
+        self._progress_bar.setRange(0, 100)
+        self._progress_bar.setValue(0)
+        self._capture_btn.setEnabled(False)
         self._capture_worker = BtSnoopCaptureWorker(self._adb, self)
         self._capture_worker.capture_ready.connect(self._on_capture_ready)
         self._capture_worker.progress.connect(
             lambda msg: self.status_message.emit(msg)
         )
-        self._capture_worker.error_occurred.connect(
-            lambda e: self.status_message.emit(e)
-        )
-        self._capture_worker.finished.connect(
-            lambda: setattr(self, "_capture_worker", None)
-        )
+        self._capture_worker.progress_pct.connect(self._progress_bar.setValue)
+        self._capture_worker.error_occurred.connect(self._on_capture_error)
+        self._capture_worker.finished.connect(self._on_capture_finished)
         self._capture_worker.start()
 
+    def _on_capture_error(self, msg: str) -> None:
+        self.status_message.emit(msg)
+        self._progress_bar.setVisible(False)
+        self._capture_btn.setEnabled(True)
+
+    def _on_capture_finished(self) -> None:
+        self._capture_worker = None
+        self._capture_btn.setEnabled(True)
+
     def _on_capture_ready(self, packets: list[HCIPacket]) -> None:
+        self._progress_bar.setValue(95)
+        self.status_message.emit(
+            f"Loading {len(packets):,} packets into table..."
+        )
         self._packets = packets
         self._apply_filters()
         stats = compute_stats(packets)
         self._update_stats(stats)
-        self.status_message.emit(f"Captured {len(packets)} HCI packets")
+        self._progress_bar.setValue(100)
+        QTimer.singleShot(500, lambda: self._progress_bar.setVisible(False))
+        self.status_message.emit(f"Captured {len(packets):,} HCI packets")
 
     # --- Live capture ---
 
@@ -832,7 +943,7 @@ class BluetoothTab(QWidget):
     def _clear(self) -> None:
         self._packets.clear()
         self._filtered_packets.clear()
-        self._packet_table.setRowCount(0)
+        self._packet_model.set_packets([])
         self._detail_text.clear()
         self._pkt_count_label.setText("0 packets")
         self._stats_label.setText(
@@ -866,64 +977,19 @@ class BluetoothTab(QWidget):
             filtered.append(pkt)
 
         self._filtered_packets = filtered
-        self._populate_table(filtered)
+        self._packet_model.set_packets(filtered)
         self._pkt_count_label.setText(
             f"{len(filtered)}/{len(self._packets)} packets"
         )
 
-    def _populate_table(self, packets: list[HCIPacket]) -> None:
-        self._packet_table.setUpdatesEnabled(False)
-        self._packet_table.setRowCount(len(packets))
-
-        for row, pkt in enumerate(packets):
-            # #
-            idx_item = QTableWidgetItem(str(pkt.index))
-            idx_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self._packet_table.setItem(row, 0, idx_item)
-
-            # Time
-            time_str = f"{pkt.relative_time:.6f}"
-            time_item = QTableWidgetItem(time_str)
-            time_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self._packet_table.setItem(row, 1, time_item)
-
-            # Type
-            type_item = QTableWidgetItem(pkt.type_name)
-            type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            color = PKT_TYPE_COLORS.get(pkt.type_name, QColor("#d4d4d4"))
-            type_item.setForeground(color)
-            self._packet_table.setItem(row, 2, type_item)
-
-            # Direction
-            dir_item = QTableWidgetItem(pkt.direction_str)
-            dir_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._packet_table.setItem(row, 3, dir_item)
-
-            # Protocol
-            proto_item = QTableWidgetItem(pkt.protocol)
-            proto_color = PROTOCOL_COLORS.get(pkt.protocol, QColor("#d4d4d4"))
-            proto_item.setForeground(proto_color)
-            self._packet_table.setItem(row, 4, proto_item)
-
-            # Summary
-            summary_item = QTableWidgetItem(pkt.summary)
-            summary_item.setForeground(color)
-            self._packet_table.setItem(row, 5, summary_item)
-
-            # Size
-            size_item = QTableWidgetItem(str(len(pkt.raw_data)))
-            size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self._packet_table.setItem(row, 6, size_item)
-
-        self._packet_table.setUpdatesEnabled(True)
-
     # --- Packet detail ---
 
-    def _on_packet_selected(self, row: int, _col: int, _prev_row: int, _prev_col: int) -> None:
-        if row < 0 or row >= len(self._filtered_packets):
+    def _on_row_changed(self, current: QModelIndex, _previous: QModelIndex) -> None:
+        if not current.isValid():
             return
-        pkt = self._filtered_packets[row]
-        self._show_packet_detail(pkt)
+        pkt = self._packet_model.packet_at(current.row())
+        if pkt:
+            self._show_packet_detail(pkt)
 
     def _show_packet_detail(self, pkt: HCIPacket) -> None:
         if self._hex_toggle.isChecked():
@@ -965,13 +1031,14 @@ class BluetoothTab(QWidget):
         self._detail_text.setPlainText("\n".join(lines))
 
     def _toggle_hex_view(self, checked: bool) -> None:
-        row = self._packet_table.currentRow()
-        if row >= 0 and row < len(self._filtered_packets):
-            pkt = self._filtered_packets[row]
-            if checked:
-                self._show_hex_view(pkt)
-            else:
-                self._show_detail_view(pkt)
+        idx = self._packet_table.currentIndex()
+        if idx.isValid():
+            pkt = self._packet_model.packet_at(idx.row())
+            if pkt:
+                if checked:
+                    self._show_hex_view(pkt)
+                else:
+                    self._show_detail_view(pkt)
 
     # --- Statistics ---
 
