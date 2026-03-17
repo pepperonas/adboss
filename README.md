@@ -10,7 +10,7 @@ ADBOSS provides a unified control panel for device monitoring, system settings, 
 
 <p align="center">
 
-![Version](https://img.shields.io/badge/Version-0.3.1-00BCD4?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-0.4.0-00BCD4?style=for-the-badge)
 ![CI](https://img.shields.io/github/actions/workflow/status/pepperonas/adboss/tests.yml?style=for-the-badge&logo=github&logoColor=white&label=Tests)
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Qt](https://img.shields.io/badge/Qt6-PySide6-41CD52?style=for-the-badge&logo=qt&logoColor=white)
@@ -61,6 +61,7 @@ Real-time device overview with auto-refresh (configurable, default 5s):
 - **App Actions** — Launch, Force Stop, Uninstall (with confirmation), Clear Data
 - **Enable/Disable** — Disable bloatware without uninstalling (via context menu)
 - **Permissions Dialog** — View all app permissions, grant/revoke with checkboxes
+- **APK Extract** — Pull any app's APK from the device via button or context menu, saves as `<package>.apk`
 - **APK Install** — File picker dialog or drag & drop `.apk` files onto the tab
 - **Background Loading** — Package list loads in a background thread
 
