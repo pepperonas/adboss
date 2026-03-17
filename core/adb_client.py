@@ -492,15 +492,19 @@ class ADBClient:
         """Enable HCI snoop logging and optionally restart Bluetooth.
 
         Bluetooth must be restarted after enabling for the log to start.
+        On Samsung/strict-SELinux devices, setprop may silently fail — that's OK,
+        the settings DB entry is sufficient.
         """
         self._shell("settings put secure bluetooth_hci_log 1")
-        self._shell("setprop persist.bluetooth.btsnoopenable true")
-        self._shell("setprop persist.bluetooth.btsnooplogmode full")
+        # These may fail on Samsung/locked devices — ignore errors
+        self._shell("setprop persist.bluetooth.btsnoopenable true 2>/dev/null")
+        self._shell("setprop persist.bluetooth.btsnooplogmode full 2>/dev/null")
         if restart_bt:
             self._shell("svc bluetooth disable")
             import time
-            time.sleep(1)
+            time.sleep(2)
             self._shell("svc bluetooth enable")
+            time.sleep(3)  # Wait for BT stack to fully initialize
         return self.is_bt_snoop_enabled()
 
     def disable_bt_snoop(self) -> None:
@@ -524,16 +528,27 @@ class ADBClient:
                 return result.strip()
         return ""
 
-    def get_bt_snoop_log_data(self) -> tuple[bytes, str]:
+    def get_bt_snoop_log_data(
+        self, use_bugreport: bool = True, progress_cb=None
+    ) -> tuple[bytes, str]:
         """Pull btsnoop log with fallback chain. Returns (data, method_used).
 
         Fallback order:
         1. exec-out cat (fast, works ~60-70% of devices)
         2. Copy to /data/local/tmp/ then pull (works ~85%)
-        3. Bugreport extraction (slow but works ~95%)
+        3. Bugreport extraction (slow ~60-90s, but works ~95% incl. Samsung)
+
+        Args:
+            use_bugreport: If False, skip bugreport fallback (for fast polling).
+            progress_cb: Optional callable(str) for progress updates.
         """
+        def _progress(msg: str) -> None:
+            if progress_cb:
+                progress_cb(msg)
+
         # Method 1: Direct exec-out cat
         for remote in self._BT_SNOOP_PATHS:
+            _progress(f"Trying direct read: {remote}")
             cmd = self._base_cmd() + ["exec-out", "cat", remote]
             logger.debug("BT snoop: trying exec-out %s", remote)
             try:
@@ -547,6 +562,7 @@ class ADBClient:
         # Method 2: Copy to world-readable tmp, then pull
         tmp_remote = "/data/local/tmp/_adboss_btsnoop.log"
         for remote in self._BT_SNOOP_PATHS:
+            _progress(f"Trying copy: {remote}")
             logger.debug("BT snoop: trying copy %s -> %s", remote, tmp_remote)
             cp_out = self._shell(f"cp {remote} {tmp_remote} 2>/dev/null && echo OK")
             if "OK" in cp_out:
@@ -560,44 +576,72 @@ class ADBClient:
                 except (subprocess.TimeoutExpired, OSError):
                     self._shell(f"rm -f {tmp_remote}")
 
+        if not use_bugreport:
+            return b"", ""
+
         # Method 3: Extract from bugreport (slow but most reliable)
+        _progress("Direct access blocked (SELinux). Pulling bugreport (~60-90s)...")
         logger.debug("BT snoop: trying bugreport extraction")
-        data = self._extract_bt_snoop_from_bugreport()
+        data = self._extract_bt_snoop_from_bugreport(progress_cb=progress_cb)
         if data:
-            logger.info("BT snoop: success via bugreport")
+            logger.info("BT snoop: success via bugreport (%d bytes)", len(data))
             return data, "bugreport"
 
         return b"", ""
 
-    def _extract_bt_snoop_from_bugreport(self) -> bytes:
-        """Extract btsnoop log from adb bugreport zip."""
+    def _extract_bt_snoop_from_bugreport(self, progress_cb=None) -> bytes:
+        """Extract btsnoop log from adb bugreport zip.
+
+        This is the only method that works on Samsung and other strict-SELinux
+        devices. Takes ~60-90s due to full bugreport generation.
+        """
         import glob
         import tempfile
         import zipfile
 
+        def _progress(msg: str) -> None:
+            if progress_cb:
+                progress_cb(msg)
+
         with tempfile.TemporaryDirectory() as tmpdir:
             bugreport_base = f"{tmpdir}/bugreport"
             cmd = self._base_cmd() + ["bugreport", bugreport_base]
+            _progress("Generating bugreport (this takes ~60-90s)...")
             try:
-                subprocess.run(cmd, capture_output=True, timeout=120)
-            except (subprocess.TimeoutExpired, OSError) as e:
+                subprocess.run(cmd, capture_output=True, timeout=180)
+            except subprocess.TimeoutExpired:
+                logger.warning("Bugreport timed out (180s)")
+                _progress("Bugreport timed out")
+                return b""
+            except OSError as e:
                 logger.warning("Bugreport failed: %s", e)
                 return b""
 
             zips = glob.glob(f"{tmpdir}/bugreport*.zip")
             if not zips:
+                _progress("Bugreport generated but no ZIP found")
                 return b""
 
+            _progress("Extracting btsnoop from bugreport...")
             try:
                 with zipfile.ZipFile(zips[0], "r") as zf:
-                    # Search for btsnoop in the archive
-                    for name in zf.namelist():
-                        if "btsnoop_hci" in name.lower():
-                            data = zf.read(name)
-                            if data[:8] == b"btsnoop\x00":
-                                return data
+                    # Search for btsnoop files, prefer newest
+                    bt_files = [
+                        n for n in zf.namelist()
+                        if "btsnoop_hci" in n.lower() and not n.endswith("/")
+                    ]
+                    # Prefer .log over .log.last
+                    bt_files.sort(key=lambda n: (n.endswith(".last"), n))
+                    for name in bt_files:
+                        data = zf.read(name)
+                        if data[:8] == b"btsnoop\x00":
+                            _progress(
+                                f"Found {name} ({len(data):,} bytes)"
+                            )
+                            return data
             except (zipfile.BadZipFile, KeyError, OSError) as e:
                 logger.warning("Bugreport extraction failed: %s", e)
+                _progress(f"Extraction failed: {e}")
 
         return b""
 

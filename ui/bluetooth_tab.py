@@ -93,14 +93,15 @@ class BtSnoopCaptureWorker(QThread):
         self._running = True
         self.progress.emit("Pulling btsnoop_hci.log (trying multiple methods)...")
         try:
-            data, method = self._adb.get_bt_snoop_log_data()
+            data, method = self._adb.get_bt_snoop_log_data(
+                progress_cb=lambda msg: self.progress.emit(msg)
+            )
             if not data:
                 self.error_occurred.emit(
-                    "No btsnoop log found. Tried: direct read, copy, "
-                    "and bugreport extraction.\n"
+                    "No btsnoop log found. All methods failed.\n"
                     "1. Enable 'Bluetooth HCI snoop log' in Developer Options\n"
                     "2. Use the 'Enable HCI Log' button (restarts Bluetooth)\n"
-                    "3. Generate some BT traffic, then try again"
+                    "3. Generate BT traffic (connect a device), then try again"
                 )
                 return
             self.progress.emit(
@@ -113,7 +114,7 @@ class BtSnoopCaptureWorker(QThread):
                 )
                 return
             self.progress.emit(
-                f"Decoded {len(packets)} packets (via {method})"
+                f"Decoded {len(packets):,} packets (via {method})"
             )
             self.capture_ready.emit(packets)
         except Exception as e:
@@ -149,11 +150,33 @@ class LiveCaptureWorker(QThread):
         if self._try_btsnoop_net():
             return  # btsnoop_net handled the loop
 
-        # Fall back to polling
-        self.progress.emit("Live: using file polling (2s interval)")
+        # Fall back to polling — first test which method works
+        self.progress.emit("Live: testing fastest available capture method...")
+        test_data, test_method = self._adb.get_bt_snoop_log_data(
+            use_bugreport=False
+        )
+        if test_data:
+            # Fast method available — poll every 2s
+            self.progress.emit(f"Live: polling via {test_method} (2s interval)")
+            self._poll_loop(use_bugreport=False)
+        else:
+            # Only bugreport works (Samsung etc.) — poll every 90s
+            self.progress.emit(
+                "Live: only bugreport method available (~60-90s per pull). "
+                "Recommend using 'Pull Capture' instead for this device."
+            )
+            self._poll_loop(use_bugreport=True, interval_override=90.0)
+
+    def _poll_loop(
+        self, use_bugreport: bool, interval_override: float | None = None
+    ) -> None:
+        interval = interval_override or self._interval
         while self._running:
             try:
-                data, _method = self._adb.get_bt_snoop_log_data()
+                data, method = self._adb.get_bt_snoop_log_data(
+                    use_bugreport=use_bugreport,
+                    progress_cb=lambda msg: self.progress.emit(f"Live: {msg}"),
+                )
                 if data:
                     packets = parse_btsnoop(data)
                     if len(packets) > self._last_count:
@@ -161,16 +184,16 @@ class LiveCaptureWorker(QThread):
                         self._last_count = len(packets)
                         self.new_packets.emit(new_pkts)
                         self.progress.emit(
-                            f"Live: {len(packets)} total packets "
+                            f"Live ({method}): {len(packets)} total "
                             f"(+{len(new_pkts)} new)"
                         )
             except Exception as e:
                 if self._running:
                     self.error_occurred.emit(str(e))
             # Sleep in small increments so stop() is responsive
-            end = time.monotonic() + self._interval
+            end = time.monotonic() + interval
             while self._running and time.monotonic() < end:
-                time.sleep(0.1)
+                time.sleep(0.2)
 
     def _try_btsnoop_net(self) -> bool:
         """Try real-time capture via btsnoop_net socket (port 8872).
