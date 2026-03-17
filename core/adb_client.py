@@ -279,6 +279,28 @@ class ADBClient:
         """Revoke a runtime permission."""
         self._shell(f"pm revoke {package} {permission}")
 
+    def get_apk_path(self, package: str) -> str:
+        """Get the APK path on device for a package."""
+        output = self._shell(f"pm path {package}").strip()
+        # Output: "package:/data/app/.../base.apk"
+        for line in output.splitlines():
+            line = line.strip()
+            if line.startswith("package:"):
+                return line[8:]
+        return ""
+
+    def extract_apk(self, package: str, local_dir: str) -> str:
+        """Extract APK from device to local directory. Returns local path."""
+        remote = self.get_apk_path(package)
+        if not remote:
+            return ""
+        filename = f"{package}.apk"
+        local_path = str(Path(local_dir) / filename)
+        result = self.pull_file(remote, local_path)
+        if "error" in result.lower():
+            return ""
+        return local_path
+
     def launch_app(self, package: str) -> None:
         """Launch an app."""
         self._shell(

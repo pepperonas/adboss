@@ -190,7 +190,7 @@ class AppsTab(QWidget):
         for label, handler in [
             ("Launch", self._launch), ("Force Stop", self._force_stop),
             ("Uninstall", self._uninstall), ("Clear Data", self._clear_data),
-            ("Permissions", self._show_permissions),
+            ("Extract APK", self._extract_apk), ("Permissions", self._show_permissions),
         ]:
             btn = QPushButton(label)
             btn.clicked.connect(handler)
@@ -251,6 +251,8 @@ class AppsTab(QWidget):
         menu.addAction("Force Stop", self._force_stop)
         menu.addAction("Uninstall", self._uninstall)
         menu.addAction("Clear Data", self._clear_data)
+        menu.addAction("Extract APK", self._extract_apk)
+        menu.addSeparator()
         menu.addAction("Disable", self._disable)
         menu.addAction("Enable", self._enable)
         menu.addAction("Permissions", self._show_permissions)
@@ -304,6 +306,25 @@ class AppsTab(QWidget):
         if pkg and self._adb:
             dlg = PermissionsDialog(self._adb, pkg, self)
             dlg.exec()
+
+    def _extract_apk(self) -> None:
+        pkg = self._selected_package()
+        if not pkg or not self._adb:
+            return
+        save_dir = QFileDialog.getExistingDirectory(
+            self, "Save APK to...", str(Path.home() / "Downloads")
+        )
+        if not save_dir:
+            return
+        self.status_message.emit(f"Extracting {pkg}...")
+        local_path = self._adb.extract_apk(pkg, save_dir)
+        if local_path:
+            self.status_message.emit(
+                f"Extracted: {Path(local_path).name} "
+                f"({Path(local_path).stat().st_size / 1024 / 1024:.1f} MB)"
+            )
+        else:
+            self.status_message.emit(f"Failed to extract APK for {pkg}")
 
     def _install_apk(self) -> None:
         if not self._adb:
