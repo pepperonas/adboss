@@ -162,7 +162,7 @@ class LiveCaptureWorker(QThread):
         else:
             # Only bugreport works (Samsung etc.) — poll every 90s
             self.progress.emit(
-                "Live: only bugreport method available (~60-90s per pull). "
+                "Live: only bugreport method available (~1-4 min per pull). "
                 "Recommend using 'Pull Capture' instead for this device."
             )
             self._poll_loop(use_bugreport=True, interval_override=90.0)

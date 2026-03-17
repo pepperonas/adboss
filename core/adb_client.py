@@ -536,7 +536,7 @@ class ADBClient:
         Fallback order:
         1. exec-out cat (fast, works ~60-70% of devices)
         2. Copy to /data/local/tmp/ then pull (works ~85%)
-        3. Bugreport extraction (slow ~60-90s, but works ~95% incl. Samsung)
+        3. Bugreport extraction (slow ~1-4 min, but works ~95% incl. Samsung)
 
         Args:
             use_bugreport: If False, skip bugreport fallback (for fast polling).
@@ -580,7 +580,7 @@ class ADBClient:
             return b"", ""
 
         # Method 3: Extract from bugreport (slow but most reliable)
-        _progress("Direct access blocked (SELinux). Pulling bugreport (~60-90s)...")
+        _progress("Direct access blocked (SELinux). Pulling bugreport (~1-4 min)...")
         logger.debug("BT snoop: trying bugreport extraction")
         data = self._extract_bt_snoop_from_bugreport(progress_cb=progress_cb)
         if data:
@@ -593,7 +593,7 @@ class ADBClient:
         """Extract btsnoop log from adb bugreport zip.
 
         This is the only method that works on Samsung and other strict-SELinux
-        devices. Takes ~60-90s due to full bugreport generation.
+        devices. Takes ~1-4 min due to full bugreport generation.
         """
         import glob
         import tempfile
@@ -606,11 +606,11 @@ class ADBClient:
         with tempfile.TemporaryDirectory() as tmpdir:
             bugreport_base = f"{tmpdir}/bugreport"
             cmd = self._base_cmd() + ["bugreport", bugreport_base]
-            _progress("Generating bugreport (this takes ~60-90s)...")
+            _progress("Generating bugreport (this takes ~1-4 min)...")
             try:
-                subprocess.run(cmd, capture_output=True, timeout=180)
+                subprocess.run(cmd, capture_output=True, timeout=300)
             except subprocess.TimeoutExpired:
-                logger.warning("Bugreport timed out (180s)")
+                logger.warning("Bugreport timed out (300s)")
                 _progress("Bugreport timed out")
                 return b""
             except OSError as e:
